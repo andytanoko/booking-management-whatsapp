@@ -1,0 +1,125 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Manajemen Reschedule Booking</h2>
+  <p>Lihat dan kelola permintaan reschedule dari customer. Kirim reminder jadwal baru dan konfirmasi perubahan.</p>
+  {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+</section>
+
+{% if reschedules %}
+<section class="card">
+  <h2>Booking yang Perlu Reschedule</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Pelanggan</th>
+          <th>Layanan</th>
+          <th>Jadwal Awal</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in reschedules %}
+        <tr>
+          <td>{{ item.id }}</td>
+          <td>{{ item.customer.name }}<br /><small>{{ item.customer.phone }}</small></td>
+          <td>{{ item.service_type.name }}</td>
+          <td>{{ item.scheduled_start.strftime('%d-%m-%Y %H:%M') }}</td>
+          <td>
+            <button type="button" class="btn-secondary" onclick="document.getElementById('form-{{ item.id }}').scrollIntoView({behavior: 'smooth'}); document.getElementById('tab-remind-{{ item.id }}').click()">
+              📤 Kirim Reminder
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Proses Reschedule Detail</h2>
+  {% for item in reschedules %}
+  <div id="form-{{ item.id }}" style="margin-bottom: 2rem; padding: 1rem; border: 1px solid #ddd; border-radius: 4px;">
+    <h3>Booking #{{ item.id }} - {{ item.customer.name }}</h3>
+    <p><strong>Layanan:</strong> {{ item.service_type.name }} | <strong>Jadwal Awal:</strong> {{ item.scheduled_start.strftime('%d-%m-%Y %H:%M') }}</p>
+    
+    <!-- Tabs for Remind and Confirm -->
+    <div style="border-bottom: 1px solid #ccc; margin-bottom: 1rem;">
+      <button id="tab-remind-{{ item.id }}" type="button" class="tab-btn" onclick="switchTab({{ item.id }}, 'remind')" style="padding: 0.5rem 1rem; border: none; cursor: pointer; border-bottom: 2px solid #007bff;">
+        📨 Kirim Reminder
+      </button>
+      <button id="tab-confirm-{{ item.id }}" type="button" class="tab-btn" onclick="switchTab({{ item.id }}, 'confirm')" style="padding: 0.5rem 1rem; border: none; cursor: pointer; border-bottom: 2px solid transparent;">
+        ✅ Konfirmasi Jadwal Baru
+      </button>
+    </div>
+    
+    <!-- Remind Tab -->
+    <div id="remind-{{ item.id }}" class="tab-content" style="display: block;">
+      <h4>Kirim Reminder Reschedule ke Customer</h4>
+      {% if notify and notify.get(item.id) %}
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="send_reminder" />
+        <input type="hidden" name="booking_id" value="{{ item.id }}" />
+        <label>Pesan Reminder
+          <textarea name="message" rows="5">{{ notify[item.id].message }}</textarea>
+        </label>
+        <p class="hint">Placeholder: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_lama}</code>, <code>{tanggal_baru}</code></p>
+        {% if notify[item.id].target %}
+        <button type="submit" class="btn-primary">📤 Kirim Reminder ke {{ item.customer.name }}</button>
+        {% else %}
+        <p style="color: #d9534f;">⚠️ Nomor WhatsApp customer tidak tersedia.</p>
+        {% endif %}
+      </form>
+      {% endif %}
+    </div>
+    
+    <!-- Confirm Tab -->
+    <div id="confirm-{{ item.id }}" class="tab-content" style="display: none;">
+      <h4>Konfirmasi Jadwal Baru</h4>
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="confirm_reschedule" />
+        <input type="hidden" name="booking_id" value="{{ item.id }}" />
+        <label>Jadwal Baru
+          <input type="datetime-local" name="new_scheduled_start" required />
+        </label>
+        <p class="hint">Customer akan dikonfirmasi dengan jadwal ini. Sistem akan cek konflik dan jam operasional otomatis.</p>
+        <button type="submit" class="btn-primary">✅ Konfirmasi Reschedule</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</section>
+
+<script>
+function switchTab(bookingId, tab) {
+  // Hide both tabs
+  document.getElementById('remind-' + bookingId).style.display = 'none';
+  document.getElementById('confirm-' + bookingId).style.display = 'none';
+  
+  // Remove active border from both buttons
+  document.getElementById('tab-remind-' + bookingId).style.borderBottom = '2px solid transparent';
+  document.getElementById('tab-confirm-' + bookingId).style.borderBottom = '2px solid transparent';
+  
+  // Show selected tab and highlight button
+  if (tab === 'remind') {
+    document.getElementById('remind-' + bookingId).style.display = 'block';
+    document.getElementById('tab-remind-' + bookingId).style.borderBottom = '2px solid #007bff';
+  } else if (tab === 'confirm') {
+    document.getElementById('confirm-' + bookingId).style.display = 'block';
+    document.getElementById('tab-confirm-' + bookingId).style.borderBottom = '2px solid #007bff';
+  }
+}
+</script>
+
+{% else %}
+<section class="card">
+  <div class="alert info">
+    ✓ Tidak ada booking yang perlu reschedule. Semua booking sudah sesuai jadwal.
+  </div>
+</section>
+{% endif %}
+{% endblock %}

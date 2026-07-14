@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="cards-row">
+  <article class="card stat">
+    <h3>Booking Hari Ini</h3>
+    <p>{{ bookings_today }}</p>
+  </article>
+  <article class="card stat">
+    <h3>Booking Pending</h3>
+    <p>{{ pending }}</p>
+  </article>
+  <article class="card stat">
+    <h3>Total Pelanggan</h3>
+    <p>{{ customers }}</p>
+  </article>
+</section>
+
+<section class="card">
+  <h2>Status Sistem</h2>
+  <ul>
+    <li>Jam Operasional: 09:00 - 18:00</li>
+    <li>Layanan: PPF, Coating, Polishing, Interior Detailing</li>
+    <li>Reminder: H-3, H-1, H-8 jam</li>
+  </ul>
+</section>
+{% endblock %}

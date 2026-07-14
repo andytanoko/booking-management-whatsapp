@@ -1,0 +1,315 @@
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from urllib import error, request
+from urllib.parse import urlparse
+from abc import ABC, abstractmethod
+from datetime import datetime
+
+from flask import current_app
+
+from app.models import WhatsAppMessage, db
+from app.services.settings_store import get_setting
+
+
+@dataclass
+class BridgeProfile:
+    base_url: str
+    send_path: str
+    qr_path: str
+    api_key: str
+    instance_id: str
+    auth_required: bool
+    connected: bool
+    has_qr: bool
+    detected_from: str
+
+
+def _request_json(endpoint: str, timeout: float = 1.5) -> dict | None:
+    req = request.Request(endpoint, method="GET")
+    try:
+        with request.urlopen(req, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="ignore").strip()
+            if not raw:
+                return None
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _probe_bridge(base_url: str, qr_path: str) -> bool:
+    url = base_url.rstrip("/")
+    path = qr_path if qr_path.startswith("/") else f"/{qr_path}"
+    candidates = [
+        f"{url}/health",
+        f"{url}/status",
+        f"{url}{path}",
+    ]
+    for endpoint in candidates:
+        req = request.Request(endpoint, method="GET")
+        try:
+            with request.urlopen(req, timeout=1.5) as response:
+                if 200 <= response.status < 500:
+                    return True
+        except Exception:
+            continue
+    return False
+
+
+def discover_bridge_base_url(extra_candidates: list[str] | None = None) -> str:
+    qr_path = get_setting("bridge_qr_path", "/qr").strip() or "/qr"
+
+    configured = get_setting("bridge_base_url", "").strip().rstrip("/")
+    env_url = os.getenv("WHATSAPP_BRIDGE_BASE_URL", "").strip().rstrip("/")
+    public_base = get_setting("public_base_url", "").strip()
+
+    candidates: list[str] = []
+    if configured:
+        candidates.append(configured)
+    if env_url:
+        candidates.append(env_url)
+
+    if public_base:
+        parsed = urlparse(public_base)
+        if parsed.hostname:
+            candidates.append(f"{parsed.scheme or 'http'}://{parsed.hostname}:3000")
+
+    candidates.extend(
+        [
+            "http://127.0.0.1:3000",
+            "http://localhost:3000",
+            "http://wa-bridge:3000",
+        ]
+    )
+
+    if extra_candidates:
+        candidates.extend(extra_candidates)
+
+    seen = set()
+    for item in candidates:
+        if not item:
+            continue
+        normalized = item.rstrip("/")
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if _probe_bridge(normalized, qr_path):
+            return normalized
+    return ""
+
+
+def discover_bridge_profile(extra_candidates: list[str] | None = None) -> BridgeProfile | None:
+    base_url = discover_bridge_base_url(extra_candidates)
+    if not base_url:
+        return None
+
+    qr_candidates = [
+        "/qr",
+        "/qr-code",
+        "/api/qr",
+        "/session/qr",
+    ]
+    send_candidates = [
+        "/send-message",
+        "/api/send-message",
+        "/api/messages/send",
+        "/message/send",
+    ]
+
+    # Keep configured values as first preference if present.
+    configured_qr = get_setting("bridge_qr_path", "").strip()
+    configured_send = get_setting("bridge_send_path", "").strip()
+    if configured_qr:
+        q = configured_qr if configured_qr.startswith("/") else f"/{configured_qr}"
+        qr_candidates.insert(0, q)
+    if configured_send:
+        s = configured_send if configured_send.startswith("/") else f"/{configured_send}"
+        send_candidates.insert(0, s)
+
+    qr_path = "/qr"
+    for path in qr_candidates:
+        endpoint = f"{base_url.rstrip('/')}{path}"
+        req = request.Request(endpoint, method="GET")
+        try:
+            with request.urlopen(req, timeout=1.5) as response:
+                if 200 <= response.status < 500:
+                    qr_path = path
+                    break
+        except Exception:
+            continue
+
+    api_key = os.getenv("WHATSAPP_BRIDGE_API_KEY", "").strip()
+    instance_id = ""
+    auth_required = False
+    connected = False
+    has_qr = False
+    detected_from = "heuristic"
+
+    status_payload = None
+    for status_path in ["/status", "/health", "/api/status", "/session/status"]:
+        status_payload = _request_json(f"{base_url.rstrip('/')}{status_path}")
+        if status_payload:
+            detected_from = status_path
+            break
+
+    if status_payload:
+        instance_id = str(
+            status_payload.get("instance_id")
+            or status_payload.get("session")
+            or status_payload.get("client_id")
+            or ""
+        ).strip()
+        connected = bool(status_payload.get("connected") or False)
+        has_qr = bool(status_payload.get("has_qr") or status_payload.get("qr") or False)
+        auth_required = bool(
+            status_payload.get("auth_required")
+            or status_payload.get("require_auth")
+            or status_payload.get("protected")
+            or False
+        )
+        if not api_key:
+            api_key = str(status_payload.get("api_key") or status_payload.get("token") or "").strip()
+
+    send_path = send_candidates[0]
+
+    return BridgeProfile(
+        base_url=base_url.rstrip("/"),
+        send_path=send_path,
+        qr_path=qr_path,
+        api_key=api_key,
+        instance_id=instance_id,
+        auth_required=auth_required,
+        connected=connected,
+        has_qr=has_qr,
+        detected_from=detected_from,
+    )
+
+
+class WhatsAppGateway(ABC):
+    @abstractmethod
+    def send_message(self, phone: str, text: str, chat_id: str | None = None) -> tuple[bool, str]:
+        raise NotImplementedError
+
+
+class MockWhatsAppGateway(WhatsAppGateway):
+    def send_message(self, phone: str, text: str, chat_id: str | None = None) -> tuple[bool, str]:
+        current_app.logger.info("MOCK WA SEND phone=%s chat_id=%s text=%s", phone, chat_id, text)
+        return True, "mock-sent"
+
+
+class BridgeWhatsAppGateway(WhatsAppGateway):
+    def send_message(self, phone: str, text: str, chat_id: str | None = None) -> tuple[bool, str]:
+        profile = discover_bridge_profile()
+        if not profile:
+            return False, "bridge-not-found"
+
+        base_url = profile.base_url
+        send_path = profile.send_path
+        api_key = profile.api_key
+        instance_id = profile.instance_id
+
+        if not base_url:
+            return False, "bridge-missing-url"
+
+        if not send_path.startswith("/"):
+            send_path = f"/{send_path}"
+
+        payload = {
+            "phone": phone,
+            "text": text,
+        }
+        if chat_id:
+            payload["chat_id"] = chat_id
+        if instance_id:
+            payload["instance_id"] = instance_id
+
+        raw = json.dumps(payload).encode("utf-8")
+        endpoint = f"{base_url}{send_path}"
+        req = request.Request(endpoint, data=raw, method="POST")
+        req.add_header("Content-Type", "application/json")
+        if api_key:
+            req.add_header("Authorization", f"Bearer {api_key}")
+            req.add_header("X-API-Key", api_key)
+
+        try:
+            with request.urlopen(req, timeout=10) as response:
+                if 200 <= response.status < 300:
+                    return True, f"bridge-{response.status}"
+                return False, f"bridge-{response.status}"
+        except error.HTTPError as exc:
+            return False, f"bridge-http-{exc.code}"
+        except Exception as exc:
+            current_app.logger.exception("Bridge WhatsApp send failed: %s", exc)
+            return False, "bridge-error"
+
+
+def get_gateway() -> WhatsAppGateway:
+    mode = get_setting("wa_mode", current_app.config.get("WHATSAPP_MODE", "mock")).strip().lower()
+    if mode == "bridge":
+        return BridgeWhatsAppGateway()
+    if mode == "mock":
+        return MockWhatsAppGateway()
+    return MockWhatsAppGateway()
+
+
+def fetch_whatsapp_contacts(saved_only: bool = True) -> tuple[bool, str, list[dict]]:
+    """Pull the WhatsApp address book from the bridge.
+
+    Returns (ok, status, contacts). Each contact is a dict with at least
+    ``number`` and ``name`` keys.
+    """
+    base_url = discover_bridge_base_url()
+    if not base_url:
+        return False, "bridge-not-found", []
+
+    flag = "true" if saved_only else "false"
+    endpoint = f"{base_url.rstrip('/')}/contacts?saved_only={flag}"
+    data = _request_json(endpoint, timeout=30.0)
+    if not data:
+        return False, "contacts-unavailable", []
+
+    if not data.get("ok"):
+        return False, str(data.get("error") or "contacts-error"), []
+
+    contacts = data.get("contacts")
+    if not isinstance(contacts, list):
+        contacts = []
+    return True, "ok", contacts
+
+
+def log_inbound_message(
+    phone: str, text: str, payload: dict | None = None, direction: str = "inbound"
+) -> WhatsAppMessage:
+    message = WhatsAppMessage(
+        direction=direction,
+        phone=phone,
+        message_text=text,
+        payload_json=json.dumps(payload or {}, ensure_ascii=True),
+        status="received" if direction == "inbound" else "sent",
+        created_at=datetime.utcnow(),
+    )
+    db.session.add(message)
+    db.session.commit()
+    return message
+
+
+def send_and_log_message(phone: str, text: str, chat_id: str | None = None) -> WhatsAppMessage:
+    gateway = get_gateway()
+    success, status = gateway.send_message(phone, text, chat_id=chat_id)
+    payload = {}
+    if chat_id:
+        payload["chat_id"] = chat_id
+    message = WhatsAppMessage(
+        direction="outbound",
+        phone=phone,
+        message_text=text,
+        payload_json=json.dumps(payload, ensure_ascii=True),
+        status=status if success else "failed",
+        created_at=datetime.utcnow(),
+    )
+    db.session.add(message)
+    db.session.commit()
+    return message

@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Manajemen User</h2>
+  {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+  <form method="post" class="form-grid three-col">
+    <label>Username
+      <input type="text" name="username" required />
+    </label>
+    <label>Password
+      <input type="password" name="password" required />
+    </label>
+    <label>Role
+      <select name="role" required>
+        <option value="admin">Admin</option>
+        <option value="cs">CS</option>
+        <option value="technician">Technician</option>
+      </select>
+    </label>
+    <button type="submit">Tambah User</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Daftar User</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Dibuat</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr>
+          <td>{{ user.username }}</td>
+          <td>{{ user.role }}</td>
+          <td>{{ 'aktif' if user.active else 'nonaktif' }}</td>
+          <td>{{ user.created_at.strftime('%d-%m-%Y %H:%M') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

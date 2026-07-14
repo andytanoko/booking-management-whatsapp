@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Maintenance Reminders - Coating Premium & PPF</h2>
+  {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Pelanggan</th>
+          <th>Layanan</th>
+          <th>Tanggal Selesai</th>
+          <th>Maintenance Due</th>
+          <th>Reminder Terkirim</th>
+          <th>Review Diminta</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if reminders %}
+          {% for reminder in reminders %}
+          <tr>
+            <td>{{ reminder.id }}</td>
+            <td>{{ reminder.customer.name }}<br /><small>{{ reminder.customer.phone }}</small></td>
+            <td>{{ reminder.service_type }}</td>
+            <td>{{ reminder.completed_at.strftime('%d-%m-%Y %H:%M') }}</td>
+            <td>
+              {{ reminder.maintenance_due_at.strftime('%d-%m-%Y') }}
+              {% if reminder.maintenance_due_at <= now %}
+                <br /><span style="color: red; font-size: 0.85em;">⚠️ Sudah jatuh tempo</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if reminder.reminder_sent_at %}
+                ✅ {{ reminder.reminder_sent_at.strftime('%d-%m-%Y %H:%M') }}
+              {% else %}
+                ❌ Belum
+              {% endif %}
+            </td>
+            <td>
+              {% if reminder.review_requested_at %}
+                ✅ {{ reminder.review_requested_at.strftime('%d-%m-%Y %H:%M') }}
+              {% else %}
+                ❌ Belum
+              {% endif %}
+            </td>
+            <td>
+              <form method="post" style="display: inline;">
+                <input type="hidden" name="action" value="send_reminder" />
+                <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
+                <button type="submit" class="btn-secondary" title="Kirim reminder maintenance">💬 Reminder</button>
+              </form>
+              <form method="post" style="display: inline;">
+                <input type="hidden" name="action" value="send_review" />
+                <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
+                <button type="submit" class="btn-secondary" title="Minta review Google Maps">⭐ Review</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="8" style="text-align: center; padding: 20px;">
+              Tidak ada maintenance reminders
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Edit Booking #{{ booking.id }}</h2>
+  {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+  
+  <form method="post" class="form-grid two-col">
+    <input type="hidden" name="action" value="update" />
+    
+    <label>Nama Pelanggan
+      <input type="text" name="customer_name" value="{{ booking.customer.name }}" required />
+    </label>
+    
+    <label>Nomor WhatsApp
+      <input type="text" name="phone" value="{{ booking.customer.phone }}" required />
+    </label>
+    
+    <label>Kendaraan (Merk & Type)
+      <input type="text" name="vehicle_type" placeholder="Contoh: Toyota Rush GR" value="{{ booking.vehicle_type or '' }}" />
+    </label>
+    
+    <label>Nomor Polisi
+      <input type="text" name="license_plate" placeholder="Contoh: B1234XYZ" value="{{ booking.license_plate or '' }}" />
+    </label>
+    
+    <label>Layanan
+      <select name="service_id">
+        <option value="">-- Pilih dari daftar --</option>
+        {% for service in services %}
+        <option value="{{ service.id }}" {% if service.id == booking.service_type_id %}selected{% endif %}>
+          {{ service.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    
+    <label>Atau masukkan Nama Paket
+      <input type="text" name="package_name" placeholder="Contoh: medium gold, PPF premium, coating silver" value="{{ booking.other_info or '' }}" />
+    </label>
+    
+    <small style="grid-column: span 2; color: #666;">Sistem otomatis akan menerjemahkan paket ke layanan yang sesuai. Jika tidak cocok, pilih dari dropdown di atas.</small>
+    
+    <label>Jadwal Mulai
+      <input type="datetime-local" name="scheduled_start" value="{{ booking.scheduled_start.strftime('%Y-%m-%dT%H:%M') }}" required />
+    </label>
+    
+    <label>Catatan
+      <input type="text" name="notes" value="{{ booking.notes or '' }}" />
+    </label>
+    
+    <div style="grid-column: span 2; display: flex; gap: 10px;">
+      <button type="submit" class="btn-primary">💾 Simpan Perubahan</button>
+      <a href="{{ url_for('bookings') }}" class="btn-secondary" style="text-decoration: none; display: inline-block; padding: 8px 16px; background: #999; color: white; border: none; border-radius: 4px; cursor: pointer;">❌ Batal</a>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Informasi Booking</h2>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <div>
+      <p><strong>ID:</strong> {{ booking.id }}</p>
+      <p><strong>Status:</strong> <span class="status-badge status-{{ booking.status }}">{{ statuses.get(booking.status, booking.status) }}</span></p>
+      <p><strong>Sumber:</strong> {{ booking.source }}</p>
+      <p><strong>Dibuat:</strong> {{ booking.created_at.strftime('%d-%m-%Y %H:%M') }}</p>
+    </div>
+    <div>
+      <p><strong>Jadwal Selesai (Otomatis):</strong> {{ booking.scheduled_end.strftime('%d-%m-%Y %H:%M') }}</p>
+      <p><strong>Durasi Layanan:</strong> {{ booking.service_type.duration_minutes }} menit</p>
+      {% if booking.assigned_technician %}
+      <p><strong>Teknisi:</strong> {{ booking.assigned_technician.username }}</p>
+      {% else %}
+      <p><strong>Teknisi:</strong> <em>Belum ditugaskan</em></p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,284 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Settings WhatsApp</h2>
+  <p>Hubungkan aplikasi ke WhatsApp bridge (QR gateway) agar pesan masuk/keluar berjalan otomatis.</p>
+
+  {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+  <form method="post" class="form-grid two-col">
+    <label>Mode WhatsApp
+      <select name="wa_mode" required>
+        <option value="mock" {% if settings.wa_mode == 'mock' %}selected{% endif %}>Mock (testing internal)</option>
+        <option value="bridge" {% if settings.wa_mode == 'bridge' %}selected{% endif %}>Bridge QR (current WhatsApp)</option>
+      </select>
+    </label>
+
+    <div>
+      <button type="submit" name="action" value="save">Simpan Settings</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Manajemen Layanan</h2>
+  <p>Tambah, edit, atau hapus layanan (jasa) yang ditawarkan beserta durasi pengerjaan.</p>
+
+  {% if services %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Nama Layanan</th>
+          <th>Durasi</th>
+          <th>Status</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for service in services %}
+        <tr>
+          <td>{{ service.name }}</td>
+          <td>
+            {% set mins = service.duration_minutes %}
+            {% if mins >= 1440 and mins % 1440 == 0 %}
+              {{ (mins / 1440)|int }} hari
+            {% elif mins >= 60 and mins % 60 == 0 %}
+              {{ (mins / 60)|int }} jam
+            {% else %}
+              {{ mins }} menit
+            {% endif %}
+          </td>
+          <td>
+            <span class="status-badge {% if service.active %}status-dikonfirmasi{% else %}status-batal{% endif %}">
+              {% if service.active %}Aktif{% else %}Nonaktif{% endif %}
+            </span>
+          </td>
+          <td>
+            <form method="post" style="display: inline;">
+              <input type="hidden" name="action" value="service_toggle" />
+              <input type="hidden" name="service_id" value="{{ service.id }}" />
+              <button type="submit" class="btn-small">
+                {% if service.active %}📴 Nonaktifkan{% else %}✓ Aktifkan{% endif %}
+              </button>
+            </form>
+            <button type="button" class="btn-small" onclick="editService({{ service.id }}, '{{ service.name }}', {{ service.duration_minutes }})">
+              ✏️ Edit
+            </button>
+            <form method="post" style="display: inline;" onsubmit="return confirm('Hapus layanan ini? (tidak ada booking yang menggunakan layanan ini)')">
+              <input type="hidden" name="action" value="service_delete" />
+              <input type="hidden" name="service_id" value="{{ service.id }}" />
+              <button type="submit" class="btn-small">🗑️ Hapus</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div style="margin-top: 1.5rem;">
+    <h3>Tambah/Edit Layanan</h3>
+    <form method="post" class="form-grid">
+      <input type="hidden" name="action" id="service_action" value="service_create" />
+      <input type="hidden" name="service_id" id="service_id" />
+      <label>Nama Layanan
+        <input type="text" name="service_name" id="service_name" placeholder="Contoh: PPF, Coating, Polishing" required />
+      </label>
+      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1rem;">
+        <label>Durasi Pengerjaan
+          <input type="number" name="service_duration" id="service_duration" step="0.5" placeholder="Contoh: 15, 8, 5" required />
+        </label>
+        <label>Satuan
+          <select name="service_unit" id="service_unit" required>
+            <option value="menit">Menit</option>
+            <option value="jam">Jam</option>
+            <option value="hari">Hari</option>
+          </select>
+        </label>
+      </div>
+      <div>
+        <button type="submit" class="btn-primary">💾 Simpan Layanan</button>
+        <button type="button" class="btn-secondary" onclick="resetServiceForm()" id="btn_reset" style="display:none;">❌ Batal Edit</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<script>
+function convertMinutesToUnit(minutes) {
+  if (minutes >= 1440 && minutes % 1440 === 0) {
+    return { value: minutes / 1440, unit: 'hari' };
+  } else if (minutes >= 60 && minutes % 60 === 0) {
+    return { value: minutes / 60, unit: 'jam' };
+  } else {
+    return { value: minutes, unit: 'menit' };
+  }
+}
+
+function editService(id, name, durationMinutes) {
+  const converted = convertMinutesToUnit(durationMinutes);
+  document.getElementById('service_action').value = 'service_update';
+  document.getElementById('service_id').value = id;
+  document.getElementById('service_name').value = name;
+  document.getElementById('service_duration').value = converted.value;
+  document.getElementById('service_unit').value = converted.unit;
+  document.getElementById('btn_reset').style.display = 'inline-block';
+  document.querySelector('h3').textContent = 'Edit Layanan: ' + name;
+  document.querySelector('form').scrollIntoView({behavior: 'smooth'});
+}
+
+function resetServiceForm() {
+  document.getElementById('service_action').value = 'service_create';
+  document.getElementById('service_id').value = '';
+  document.getElementById('service_name').value = '';
+  document.getElementById('service_duration').value = '';
+  document.getElementById('service_unit').value = 'menit';
+  document.getElementById('btn_reset').style.display = 'none';
+  document.querySelector('h3').textContent = 'Tambah/Edit Layanan';
+}
+</script>
+
+<section class="card">
+  <h2>Settings WhatsApp</h2>
+  <p>Hubungkan aplikasi ke WhatsApp bridge (QR gateway) agar pesan masuk/keluar berjalan otomatis.</p>
+
+  {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+  <form method="post" class="form-grid two-col">
+    <label>Mode WhatsApp
+      <select name="wa_mode" required>
+        <option value="mock" {% if settings.wa_mode == 'mock' %}selected{% endif %}>Mock (testing internal)</option>
+        <option value="bridge" {% if settings.wa_mode == 'bridge' %}selected{% endif %}>Bridge QR (current WhatsApp)</option>
+      </select>
+    </label>
+
+    <div>
+      <button type="submit" name="action" value="save">Simpan Settings</button>
+    </div>
+  <p>Pesan default yang muncul saat booking berstatus <b>Selesai</b>. CS tetap bisa mengedit sebelum mengirim.</p>
+  <form method="post" class="form-grid">
+    <label>Isi Template
+      <textarea name="booking_done_template" rows="5">{{ settings.booking_done_template }}</textarea>
+    </label>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code></p>
+    <div>
+      <button type="submit" name="action" value="save">Simpan Template</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Template Notifikasi "Reschedule"</h2>
+  <p>Pesan reminder saat ada permintaan reschedule booking. Dikirim otomatis ke customer untuk konfirmasi jadwal baru.</p>
+  <form method="post" class="form-grid">
+    <label>Isi Template
+      <textarea name="reschedule_template" rows="5">{{ settings.reschedule_template }}</textarea>
+    </label>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_lama}</code>, <code>{tanggal_baru}</code></p>
+    <div>
+      <button type="submit" name="action" value="save">Simpan Template</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Template Notifikasi "Maintenance Reminder"</h2>
+  <p>Pesan pengingat 6 bulan setelah customer selesai coating / PPF. Dikirim otomatis saat maintenance_due_at tercapai, atau manual dari halaman maintenance.</p>
+  <form method="post" class="form-grid">
+    <label>Isi Template
+      <textarea name="maintenance_reminder_template" rows="5">{{ settings.maintenance_reminder_template }}</textarea>
+    </label>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_selesai}</code></p>
+    <div>
+      <button type="submit" name="action" value="save">Simpan Template</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Template Notifikasi "Google Maps Review"</h2>
+  <p>Pesan untuk meminta customer memberikan review di Google Maps setelah selesai coating / PPF.</p>
+  <form method="post" class="form-grid">
+    <label>Isi Template
+      <textarea name="review_request_template" rows="5">{{ settings.review_request_template }}</textarea>
+    </label>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{link_review}</code></p>
+    <div>
+      <button type="submit" name="action" value="save">Simpan Template</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Konfigurasi Google Maps</h2>
+  <p>URL bisnis Google Maps Anda untuk diminta review dari customer. Akan digunakan di template review request.</p>
+  <form method="post" class="form-grid">
+    <label>Google Maps Business URL
+      <input type="url" name="google_maps_business_url" placeholder="https://www.google.com/maps/place/..." value="{{ settings.google_maps_business_url or '' }}" />
+    </label>
+    <div>
+      <button type="submit" name="action" value="save">Simpan URL</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Langkah Koneksi WhatsApp Saat Ini</h2>
+  {% if bridge_detected %}
+  <div class="alert success">Bridge terdeteksi otomatis di: <code>{{ bridge_base }}</code></div>
+  <p>Sumber deteksi: <code>{{ bridge_detected_from }}</code></p>
+  {% if bridge_auth_required %}
+  <p>Bridge Anda meminta autentikasi. Sistem akan mencoba auto-detect token jika bridge menyediakannya.</p>
+  {% endif %}
+  {% else %}
+  <div class="alert error">Bridge belum terdeteksi otomatis. Jalankan service bridge QR pada port 3000.</div>
+  {% endif %}
+  <ol>
+    <li>Set <b>Mode WhatsApp</b> ke <b>Bridge QR</b>.</li>
+    <li>Buka URL QR dari bridge, lalu scan menggunakan WhatsApp bisnis Anda.</li>
+    <li>Atur webhook inbound bridge ke URL berikut:</li>
+  </ol>
+  <p><code>{{ webhook_url }}</code></p>
+  {% if qr_url %}
+  <p>URL QR bridge (contoh): <code>{{ qr_url }}</code></p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>QR Pairing</h2>
+  {% if bridge_connected %}
+  <div class="alert success">WhatsApp sudah terhubung. QR tidak ditampilkan karena session sudah aktif.</div>
+  <p>Jika ingin ganti akun WhatsApp, logout session dari bridge lalu refresh halaman ini.</p>
+  {% elif qr_embed_url %}
+  <p>Scan QR ini dari WhatsApp pada ponsel Anda. Jika belum muncul, klik refresh.</p>
+  <div class="qr-wrap">
+    <img src="{{ qr_embed_url }}" alt="QR WhatsApp" class="qr-img" />
+  </div>
+  <form method="get">
+    <button type="submit">Refresh QR</button>
+  </form>
+  {% else %}
+  <p>QR belum tersedia. Tunggu bridge menyiapkan QR baru lalu refresh halaman ini.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Test Kirim Pesan</h2>
+  <form method="post" class="form-grid two-col">
+    <input type="hidden" name="action" value="test_send" />
+    <label>No. WhatsApp Tujuan
+      <input type="text" name="test_phone" placeholder="62812xxxx" required />
+    </label>
+    <label>Pesan Test
+      <input type="text" name="test_message" value="Tes koneksi dari Detailing Ops" required />
+    </label>
+    <div>
+      <button type="submit">Kirim Test</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

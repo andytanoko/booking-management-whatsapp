@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Manajemen Kontak Customer</h2>
+  {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('customers_sync') }}" class="sync-bar"
+        onsubmit="Array.from(this.querySelectorAll('button')).forEach(function(b){b.disabled=true;}); this.dataset.busy='1';">
+    <button type="submit" name="saved_only" value="true" class="btn-secondary">Sinkron Kontak Tersimpan</button>
+    <button type="submit" name="saved_only" value="false" class="btn-secondary">Sinkron Semua Kontak</button>
+    <span class="hint">Menarik nomor dari buku kontak WhatsApp yang terhubung.</span>
+  </form>
+
+  <form method="post" class="form-grid three-col" id="contact-form">
+    <input type="hidden" name="action" value="create" id="form-action" />
+    <input type="hidden" name="customer_id" value="" id="form-customer-id" />
+    <label>Nama
+      <input type="text" name="name" id="form-name" required />
+    </label>
+    <label>No. WhatsApp
+      <input type="text" name="phone" id="form-phone" placeholder="0812xxxxxxx" required />
+    </label>
+    <label>Kendaraan
+      <input type="text" name="vehicle" id="form-vehicle" placeholder="opsional" />
+    </label>
+    <label class="full-col">Catatan
+      <input type="text" name="notes" id="form-notes" placeholder="opsional" />
+    </label>
+    <div class="form-actions">
+      <button type="submit" id="form-submit">Tambah Kontak</button>
+      <button type="button" class="btn-secondary" id="form-cancel" hidden>Batal</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Daftar Kontak</h2>
+  <form method="get" class="search-bar">
+    <input type="text" name="q" value="{{ search }}" placeholder="Cari nama atau nomor…" />
+    <button type="submit">Cari</button>
+    {% if search %}<a class="btn-secondary" href="{{ url_for('customers') }}">Reset</a>{% endif %}
+  </form>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Nama</th>
+          <th>No. WhatsApp</th>
+          <th>LID</th>
+          <th>Kendaraan</th>
+          <th>Catatan</th>
+          <th>Booking</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in contacts %}
+        <tr>
+          <td>{{ c.name }}</td>
+          <td>{{ c.phone }}</td>
+          <td>{{ c.lid or '-' }}</td>
+          <td>{{ c.vehicle_info or '-' }}</td>
+          <td>{{ c.notes or '-' }}</td>
+          <td>{{ booking_counts.get(c.id, 0) }}</td>
+          <td class="row-actions">
+            <button
+              type="button"
+              class="btn-secondary btn-edit"
+              data-id="{{ c.id }}"
+              data-name="{{ c.name }}"
+              data-phone="{{ c.phone }}"
+              data-vehicle="{{ c.vehicle_info or '' }}"
+              data-notes="{{ c.notes or '' }}"
+            >Edit</button>
+            <form method="post" class="inline-form" onsubmit="return confirm('Hapus kontak ini?');">
+              <input type="hidden" name="action" value="delete" />
+              <input type="hidden" name="customer_id" value="{{ c.id }}" />
+              <button type="submit" class="btn-danger">Hapus</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7">Belum ada kontak.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+  (function () {
+    var form = document.getElementById("contact-form");
+    var actionInput = document.getElementById("form-action");
+    var idInput = document.getElementById("form-customer-id");
+    var nameInput = document.getElementById("form-name");
+    var phoneInput = document.getElementById("form-phone");
+    var vehicleInput = document.getElementById("form-vehicle");
+    var notesInput = document.getElementById("form-notes");
+    var submitBtn = document.getElementById("form-submit");
+    var cancelBtn = document.getElementById("form-cancel");
+
+    function resetForm() {
+      actionInput.value = "create";
+      idInput.value = "";
+      nameInput.value = "";
+      phoneInput.value = "";
+      vehicleInput.value = "";
+      notesInput.value = "";
+      submitBtn.textContent = "Tambah Kontak";
+      cancelBtn.hidden = true;
+    }
+
+    document.querySelectorAll(".btn-edit").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        actionInput.value = "update";
+        idInput.value = btn.getAttribute("data-id");
+        nameInput.value = btn.getAttribute("data-name");
+        phoneInput.value = btn.getAttribute("data-phone");
+        vehicleInput.value = btn.getAttribute("data-vehicle");
+        notesInput.value = btn.getAttribute("data-notes");
+        submitBtn.textContent = "Simpan Perubahan";
+        cancelBtn.hidden = false;
+        form.scrollIntoView({ behavior: "smooth", block: "start" });
+        nameInput.focus();
+      });
+    });
+
+    cancelBtn.addEventListener("click", resetForm);
+  })();
+</script>
+{% endblock %}
