@@ -7,31 +7,37 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   </head>
   <body>
-    <div class="bg-shape"></div>
-    <header class="topbar">
-      <div>
-        <h1>Detailing Ops</h1>
-        <p>Sistem Booking Multi User + WhatsApp</p>
-      </div>
-      {% if current_user_id %}
-      <nav>
-        <a href="{{ url_for('dashboard') }}">Dashboard</a>
-        {% if current_role in ['admin', 'cs'] %}
-        <a href="{{ url_for('bookings') }}">Bookings</a>
-        <a href="{{ url_for('reschedule') }}">Reschedule</a>
-        <a href="{{ url_for('maintenance') }}">Maintenance</a>
-        <a href="{{ url_for('customers') }}">Kontak</a>
-        <a href="{{ url_for('inbox') }}">Inbox WA</a>
-        {% endif %}
-        {% if current_role == 'admin' %}
-        <a href="{{ url_for('users') }}">Users</a>
-        <a href="{{ url_for('settings') }}">Settings</a>
-        {% endif %}
-        <a href="{{ url_for('logout') }}">Logout</a>
-      </nav>
-      {% endif %}
-    </header>
-
-    <main class="container">{% block content %}{% endblock %}</main>
+    {% if current_user_id %}
+    <div class="app-shell">
+      <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-label="Menu">☰</button>
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+          <h1>Detailing Ops</h1>
+          <p>Booking + WhatsApp</p>
+        </div>
+        <nav class="sidebar-nav">
+          <a href="{{ url_for('dashboard') }}" data-title="Dashboard"><span class="nav-icon">📊</span> Dashboard</a>
+          {% if current_role in ['admin', 'cs'] %}
+          <a href="{{ url_for('bookings') }}" data-title="Bookings"><span class="nav-icon">📅</span> Bookings</a>
+          <a href="{{ url_for('reschedule') }}" data-title="Reschedule"><span class="nav-icon">🔄</span> Reschedule</a>
+          <a href="{{ url_for('maintenance') }}" data-title="Maintenance"><span class="nav-icon">🔧</span> Maintenance</a>
+          <a href="{{ url_for('customers') }}" data-title="Kontak"><span class="nav-icon">👥</span> Kontak</a>
+          <a href="{{ url_for('inbox') }}" data-title="Inbox WA"><span class="nav-icon">💬</span> Inbox WA</a>
+          {% endif %}
+          {% if current_role == 'admin' %}
+          <a href="{{ url_for('users') }}" data-title="Users"><span class="nav-icon">🔑</span> Users</a>
+          <a href="{{ url_for('settings') }}" data-title="Settings"><span class="nav-icon">⚙️</span> Settings</a>
+          {% endif %}
+        </nav>
+        <a href="{{ url_for('logout') }}" class="sidebar-logout" data-no-spa>Logout</a>
+      </aside>
+      <main class="main-content">
+        <div id="view-root">{% block content %}{% endblock %}</div>
+      </main>
+    </div>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    {% else %}
+    <main class="container container-plain">{{ self.content() }}</main>
+    {% endif %}
   </body>
 </html>

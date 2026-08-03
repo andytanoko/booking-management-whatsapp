@@ -981,15 +981,23 @@ def _mk_reminder(app):
 class TestMaintenanceRoute:
     def test_send_reminder_not_found(self, session_login):
         resp = session_login.post(
-            "/maintenance", data={"action": "send_reminder", "reminder_id": "99999"}
+            "/maintenance", data={"action": "send_reminder", "reminder_id": "99999", "message": "hi"}
         )
         assert "tidak ditemukan" in resp.get_data(as_text=True)
+
+    def test_send_reminder_empty(self, session_login, app):
+        with app.app_context():
+            rid = _mk_reminder(app)
+        resp = session_login.post(
+            "/maintenance", data={"action": "send_reminder", "reminder_id": rid, "message": ""}
+        )
+        assert "tidak boleh kosong" in resp.get_data(as_text=True)
 
     def test_send_reminder_success(self, session_login, app):
         with app.app_context():
             rid = _mk_reminder(app)
         resp = session_login.post(
-            "/maintenance", data={"action": "send_reminder", "reminder_id": rid}
+            "/maintenance", data={"action": "send_reminder", "reminder_id": rid, "message": "hi"}
         )
         assert "terkirim" in resp.get_data(as_text=True)
 
@@ -998,21 +1006,29 @@ class TestMaintenanceRoute:
             rid = _mk_reminder(app)
         with patch("app.app.send_and_log_message", side_effect=_failed_send):
             resp = session_login.post(
-                "/maintenance", data={"action": "send_reminder", "reminder_id": rid}
+                "/maintenance", data={"action": "send_reminder", "reminder_id": rid, "message": "hi"}
             )
         assert "Gagal kirim reminder" in resp.get_data(as_text=True)
 
     def test_send_review_not_found(self, session_login):
         resp = session_login.post(
-            "/maintenance", data={"action": "send_review", "reminder_id": "99999"}
+            "/maintenance", data={"action": "send_review", "reminder_id": "99999", "message": "hi"}
         )
         assert "tidak ditemukan" in resp.get_data(as_text=True)
+
+    def test_send_review_empty(self, session_login, app):
+        with app.app_context():
+            rid = _mk_reminder(app)
+        resp = session_login.post(
+            "/maintenance", data={"action": "send_review", "reminder_id": rid, "message": ""}
+        )
+        assert "tidak boleh kosong" in resp.get_data(as_text=True)
 
     def test_send_review_success(self, session_login, app):
         with app.app_context():
             rid = _mk_reminder(app)
         resp = session_login.post(
-            "/maintenance", data={"action": "send_review", "reminder_id": rid}
+            "/maintenance", data={"action": "send_review", "reminder_id": rid, "message": "hi"}
         )
         assert "terkirim" in resp.get_data(as_text=True)
 
@@ -1021,7 +1037,7 @@ class TestMaintenanceRoute:
             rid = _mk_reminder(app)
         with patch("app.app.send_and_log_message", side_effect=_failed_send):
             resp = session_login.post(
-                "/maintenance", data={"action": "send_review", "reminder_id": rid}
+                "/maintenance", data={"action": "send_review", "reminder_id": rid, "message": "hi"}
             )
         assert "Gagal kirim review" in resp.get_data(as_text=True)
 

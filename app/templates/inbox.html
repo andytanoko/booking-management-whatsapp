@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+{% extends 'partial.html' if partial else 'base.html' %}
 {% block content %}
 <section class="wa" id="wa-app" data-last-id="{{ last_id }}">
   <aside class="wa-list">
@@ -245,7 +245,7 @@
     function connect() {
       if (typeof EventSource === "undefined") {
         if (statusEl) { statusEl.textContent = "● Realtime tidak didukung"; }
-        return;
+        return null;
       }
       var source = new EventSource("/api/whatsapp/stream?after=" + lastId);
       source.onopen = function () {
@@ -265,13 +265,17 @@
           statusEl.classList.remove("stream-online");
         }
       };
+      return source;
     }
 
     chatEl.querySelectorAll(".wa-messages").forEach(function (m) {
       m.scrollTop = m.scrollHeight;
     });
 
-    connect();
+    var activeEventSource = connect();
+    if (window.__spaRegisterCleanup && activeEventSource) {
+      window.__spaRegisterCleanup(function () { activeEventSource.close(); });
+    }
   })();
 </script>
 {% endblock %}

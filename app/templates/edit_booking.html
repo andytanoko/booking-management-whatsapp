@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+{% extends 'partial.html' if partial else 'base.html' %}
 {% block content %}
 <section class="card">
   <h2>Edit Booking #{{ booking.id }}</h2>

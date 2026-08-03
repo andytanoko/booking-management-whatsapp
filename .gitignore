@@ -48,7 +48,9 @@ coverage.xml
 
 # WhatsApp Web.js session and cache
 tools/wa-real-bridge/.wwebjs_auth/
+tools/wa-real-bridge/certs/*.crt
 tools/wa-real-bridge/.wwebjs_cache/
+tools/wa-real-bridge/instances.json
 
 # Node dependencies
 tools/wa-real-bridge/node_modules/

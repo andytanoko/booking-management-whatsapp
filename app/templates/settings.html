@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+{% extends 'partial.html' if partial else 'base.html' %}
 {% block content %}
 <section class="card">
   <h2>Settings WhatsApp</h2>
@@ -142,23 +142,7 @@ function resetServiceForm() {
 </script>
 
 <section class="card">
-  <h2>Settings WhatsApp</h2>
-  <p>Hubungkan aplikasi ke WhatsApp bridge (QR gateway) agar pesan masuk/keluar berjalan otomatis.</p>
-
-  {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
-  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
-
-  <form method="post" class="form-grid two-col">
-    <label>Mode WhatsApp
-      <select name="wa_mode" required>
-        <option value="mock" {% if settings.wa_mode == 'mock' %}selected{% endif %}>Mock (testing internal)</option>
-        <option value="bridge" {% if settings.wa_mode == 'bridge' %}selected{% endif %}>Bridge QR (current WhatsApp)</option>
-      </select>
-    </label>
-
-    <div>
-      <button type="submit" name="action" value="save">Simpan Settings</button>
-    </div>
+  <h2>Template Notifikasi "Booking Selesai"</h2>
   <p>Pesan default yang muncul saat booking berstatus <b>Selesai</b>. CS tetap bisa mengedit sebelum mengirim.</p>
   <form method="post" class="form-grid">
     <label>Isi Template
@@ -263,6 +247,117 @@ function resetServiceForm() {
   </form>
   {% else %}
   <p>QR belum tersedia. Tunggu bridge menyiapkan QR baru lalu refresh halaman ini.</p>
+  {% endif %}
+
+  {% if not bridge_connected %}
+  <div class="pairing-code-box" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #eee;">
+    <h3>Atau, Hubungkan dengan Nomor Telepon</h3>
+    <p>Alternatif tanpa scan QR. Masukkan nomor WhatsApp (kode negara + nomor, tanpa <code>+</code> atau <code>0</code> di depan, contoh <code>6281234567890</code>), lalu masukkan kode yang muncul di HP: <b>WhatsApp &gt; Perangkat Tertaut &gt; Tautkan dengan nomor telepon</b>.</p>
+    <form method="post" class="form-grid two-col">
+      <input type="hidden" name="action" value="wa_pair_request" />
+      <input type="hidden" name="pair_instance_id" value="default" />
+      <label>Nomor WhatsApp
+        <input type="text" name="pair_phone" placeholder="6281234567890" pattern="[0-9]{8,15}" required />
+      </label>
+      <div>
+        <button type="submit">Minta Kode Pairing</button>
+      </div>
+    </form>
+    {% if pairing_code and pairing_code_instance == 'default' %}
+    <div class="alert success">Kode pairing: <b style="font-size: 1.4rem; letter-spacing: 2px;">{{ pairing_code }}</b></div>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Nomor WhatsApp Terdaftar</h2>
+  <p>Daftarkan nomor WhatsApp tambahan. Setiap nomor punya sesi bridge sendiri dan QR sendiri untuk discan.</p>
+
+  {% if not bridge_detected %}
+  <div class="alert error">Bridge belum terdeteksi. Jalankan service bridge QR pada port 3000 untuk mengelola nomor tambahan.</div>
+  {% else %}
+    {% if wa_instances %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Instance ID</th>
+            <th>Status</th>
+            <th>Nomor</th>
+            <th>QR</th>
+            <th>Pairing</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for inst in wa_instances %}
+          <tr>
+            <td>{{ inst.label }}</td>
+            <td><code>{{ inst.id }}</code></td>
+            <td>
+              {% if inst.connected %}
+                <span class="alert success" style="margin:0; display:inline-block;">Terhubung</span>
+              {% elif inst.has_qr %}
+                <span class="alert" style="margin:0; display:inline-block; background:#fff4d6; color:#8a6d00;">Menunggu Scan QR</span>
+              {% elif inst.error %}
+                <span class="alert error" style="margin:0; display:inline-block;">Error: {{ inst.error }}</span>
+              {% else %}
+                <span class="alert" style="margin:0; display:inline-block; background:#eee; color:#555;">Menyiapkan...</span>
+              {% endif %}
+            </td>
+            <td>{{ inst.phone or '-' }}</td>
+            <td>
+              {% if inst.connected %}
+              -
+              {% elif inst.qr_embed_url %}
+              <img src="{{ inst.qr_embed_url }}" alt="QR {{ inst.label }}" class="qr-img qr-img-sm" />
+              {% else %}
+              Menunggu QR...
+              {% endif %}
+            </td>
+            <td>
+              {% if inst.connected %}
+              -
+              {% else %}
+              <form method="post" class="inline-form">
+                <input type="hidden" name="action" value="wa_pair_request" />
+                <input type="hidden" name="pair_instance_id" value="{{ inst.id }}" />
+                <input type="text" name="pair_phone" placeholder="6281234567890" pattern="[0-9]{8,15}" required style="width: 9rem;" />
+                <button type="submit" class="btn-small">Minta Kode</button>
+              </form>
+              {% if pairing_code and pairing_code_instance == inst.id %}
+              <div class="alert success" style="margin: 0.5rem 0 0; display: inline-block;">Kode: <b>{{ pairing_code }}</b></div>
+              {% endif %}
+              {% endif %}
+            </td>
+            <td>
+              {% if inst.id != 'default' %}
+              <form method="post" class="inline-form" onsubmit="return confirm('Hapus nomor {{ inst.label }}?');">
+                <input type="hidden" name="instance_id" value="{{ inst.id }}" />
+                <button type="submit" name="action" value="wa_number_delete" class="btn-danger">Hapus</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p>Belum ada nomor WhatsApp terdaftar.</p>
+    {% endif %}
+
+    <form method="post" class="form-grid two-col">
+      <label>Label Nomor Baru
+        <input type="text" name="wa_number_label" placeholder="Contoh: CS 2, Cabang Selatan" required />
+      </label>
+      <div>
+        <button type="submit" name="action" value="wa_number_add">Tambah Nomor &amp; Generate QR</button>
+      </div>
+    </form>
+    <p class="hint">Setelah klik tambah, scan QR yang muncul di tabel di atas menggunakan WhatsApp di HP nomor baru tersebut. Refresh halaman jika QR belum muncul.</p>
   {% endif %}
 </section>
 

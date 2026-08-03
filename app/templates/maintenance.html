@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+{% extends 'partial.html' if partial else 'base.html' %}
 {% block content %}
 <section class="card">
   <h2>Maintenance Reminders - Coating Premium & PPF</h2>
@@ -48,16 +48,24 @@
               {% endif %}
             </td>
             <td>
-              <form method="post" style="display: inline;">
-                <input type="hidden" name="action" value="send_reminder" />
-                <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
-                <button type="submit" class="btn-secondary" title="Kirim reminder maintenance">💬 Reminder</button>
-              </form>
-              <form method="post" style="display: inline;">
-                <input type="hidden" name="action" value="send_review" />
-                <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
-                <button type="submit" class="btn-secondary" title="Minta review Google Maps">⭐ Review</button>
-              </form>
+              <details class="notify-box">
+                <summary title="Kirim reminder maintenance">💬 Reminder</summary>
+                <form method="post" class="notify-form">
+                  <input type="hidden" name="action" value="send_reminder" />
+                  <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
+                  <textarea name="message" rows="4">{{ drafts[reminder.id].reminder_message }}</textarea>
+                  <button type="submit" class="btn-secondary">Kirim ke {{ reminder.customer.name }}</button>
+                </form>
+              </details>
+              <details class="notify-box">
+                <summary title="Minta review Google Maps">⭐ Review</summary>
+                <form method="post" class="notify-form">
+                  <input type="hidden" name="action" value="send_review" />
+                  <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
+                  <textarea name="message" rows="4">{{ drafts[reminder.id].review_message }}</textarea>
+                  <button type="submit" class="btn-secondary">Kirim ke {{ reminder.customer.name }}</button>
+                </form>
+              </details>
             </td>
           </tr>
           {% endfor %}

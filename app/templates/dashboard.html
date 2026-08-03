@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+{% extends 'partial.html' if partial else 'base.html' %}
 {% block content %}
 <section class="cards-row">
   <article class="card stat">

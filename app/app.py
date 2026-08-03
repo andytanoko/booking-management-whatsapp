@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import current_user_id, current_user_role, login_user, logout_user, require_auth, require_roles
@@ -18,9 +19,25 @@ from app.services.booking_engine import compute_booking_end, has_conflict, is_wi
 from app.services.reminders import run_due_reminders
 from app.services.settings_store import get_many, get_setting, set_setting
 from app.services.semantic_matcher import match_package_to_service, get_variant_info
-from app.services.whatsapp import discover_bridge_profile, fetch_whatsapp_contacts, log_inbound_message, send_and_log_message
+from app.services.whatsapp import (
+    create_wa_instance,
+    delete_wa_instance,
+    discover_bridge_profile,
+    fetch_whatsapp_contacts,
+    list_wa_instances,
+    log_inbound_message,
+    request_wa_pairing_code,
+    send_and_log_message,
+    wa_instance_qr_embed_url,
+)
 
 scheduler = BackgroundScheduler()
+
+
+def wants_partial() -> bool:
+    """True when the request comes from the SPA router (app.js), which only
+    needs the inner content block, not the full page shell."""
+    return request.headers.get("X-Requested-With") == "fetch"
 
 # Booking workflow statuses (key -> label shown in the UI). Ordered.
 BOOKING_STATUSES = {
@@ -527,15 +544,21 @@ def build_message_view(msg: WhatsAppMessage) -> dict:
     }
 
 
+SEED_USERS_SQL_PATH = os.path.join(os.path.dirname(__file__), "sql", "seed_users.sql")
+
+
+def seed_default_users() -> None:
+    """Create the default first-run accounts (admin/cs1/tech1) from a SQL
+    script instead of hard-coding usernames/passwords in Python. The script
+    only ever contains password *hashes* and is idempotent (ON CONFLICT DO
+    NOTHING), so it is safe to run on every startup."""
+    with open(SEED_USERS_SQL_PATH, "r", encoding="utf-8") as f:
+        sql_script = f.read()
+    db.session.execute(text(sql_script))
+
+
 def bootstrap_defaults() -> None:
-    if User.query.count() == 0:
-        admin = User(username="admin", role="admin")
-        admin.set_password("admin123")
-        cs1 = User(username="cs1", role="cs")
-        cs1.set_password("cs123")
-        tech1 = User(username="tech1", role="technician")
-        tech1.set_password("tech123")
-        db.session.add_all([admin, cs1, tech1])
+    seed_default_users()
 
     defaults = [
         ("Interior Detailing", 480),  # 8 jam
@@ -607,6 +630,7 @@ def create_app() -> Flask:
             bookings_today=bookings_today,
             pending=pending,
             customers=customers,
+            partial=wants_partial(),
         )
 
     @app.route("/bookings", methods=["GET", "POST"])
@@ -633,6 +657,7 @@ def create_app() -> Flask:
                 notify=notify,
                 message=message,
                 error=error,
+                partial=wants_partial(),
             )
 
         if request.method == "POST":
@@ -919,6 +944,7 @@ def create_app() -> Flask:
             statuses=BOOKING_STATUSES,
             message=message,
             error=error,
+            partial=wants_partial(),
         )
 
     @app.route("/customers", methods=["GET", "POST"])
@@ -1020,6 +1046,7 @@ def create_app() -> Flask:
             search=search,
             message=message,
             error=error,
+            partial=wants_partial(),
         )
 
     @app.route("/customers/sync", methods=["POST"])
@@ -1128,7 +1155,7 @@ def create_app() -> Flask:
                     db.session.commit()
                     message = "User berhasil ditambahkan"
         all_users = User.query.order_by(User.created_at.desc()).all()
-        return render_template("users.html", users=all_users, message=message)
+        return render_template("users.html", users=all_users, message=message, partial=wants_partial())
 
     @app.route("/inbox")
     @require_roles("admin", "cs")
@@ -1173,7 +1200,7 @@ def create_app() -> Flask:
         )
         last_id = messages[-1].id if messages else 0
         return render_template(
-            "inbox.html", conversations=conversation_list, last_id=last_id
+            "inbox.html", conversations=conversation_list, last_id=last_id, partial=wants_partial()
         )
 
     @app.route("/api/whatsapp/stream")
@@ -1260,6 +1287,7 @@ def create_app() -> Flask:
                 notify=notify,
                 message=message,
                 error=error,
+                partial=wants_partial(),
             )
 
         if request.method == "POST":
@@ -1352,26 +1380,24 @@ def create_app() -> Flask:
                     error = "Maintenance reminder tidak ditemukan"
                 else:
                     customer = reminder.customer
-                    template = get_setting("maintenance_reminder_template", DEFAULT_MAINTENANCE_REMINDER_TEMPLATE)
-                    message_text = template.format(
-                        nama=customer.name,
-                        layanan=reminder.service_type,
-                        tanggal_selesai=reminder.completed_at.strftime("%d-%m-%Y")
-                    )
-                    sent = send_and_log_message(customer.phone, message_text)
-                    if sent.status == "failed":
-                        error = f"Gagal kirim reminder: {sent.status}"
+                    message_text = request.form.get("message", "").strip()
+                    if not message_text:
+                        error = "Pesan tidak boleh kosong"
                     else:
-                        reminder.reminder_sent_at = datetime.utcnow()
-                        db.session.add(
-                            AuditLog(
-                                actor_user_id=current_user_id(),
-                                action="maintenance.reminder_sent",
-                                details=f"reminder_id={reminder_id} customer={customer.phone}",
+                        sent = send_and_log_message(customer.phone, message_text)
+                        if sent.status == "failed":
+                            error = f"Gagal kirim reminder: {sent.status}"
+                        else:
+                            reminder.reminder_sent_at = datetime.utcnow()
+                            db.session.add(
+                                AuditLog(
+                                    actor_user_id=current_user_id(),
+                                    action="maintenance.reminder_sent",
+                                    details=f"reminder_id={reminder_id} customer={customer.phone}",
+                                )
                             )
-                        )
-                        db.session.commit()
-                        message = f"Maintenance reminder terkirim ke {customer.name}"
+                            db.session.commit()
+                            message = f"Maintenance reminder terkirim ke {customer.name}"
             
             elif action == "send_review":
                 reminder_id = int(request.form.get("reminder_id", "0") or 0)
@@ -1380,40 +1406,58 @@ def create_app() -> Flask:
                     error = "Maintenance reminder tidak ditemukan"
                 else:
                     customer = reminder.customer
-                    # Get Google Maps review link from settings
-                    review_link = get_setting("google_maps_business_url", "https://maps.google.com")
-                    template = get_setting("review_request_template", DEFAULT_REVIEW_REQUEST_TEMPLATE)
-                    message_text = template.format(
-                        nama=customer.name,
-                        layanan=reminder.service_type,
-                        link_review=review_link
-                    )
-                    sent = send_and_log_message(customer.phone, message_text)
-                    if sent.status == "failed":
-                        error = f"Gagal kirim review request: {sent.status}"
+                    message_text = request.form.get("message", "").strip()
+                    if not message_text:
+                        error = "Pesan tidak boleh kosong"
                     else:
-                        reminder.review_requested_at = datetime.utcnow()
-                        db.session.add(
-                            AuditLog(
-                                actor_user_id=current_user_id(),
-                                action="maintenance.review_requested",
-                                details=f"reminder_id={reminder_id} customer={customer.phone}",
+                        sent = send_and_log_message(customer.phone, message_text)
+                        if sent.status == "failed":
+                            error = f"Gagal kirim review request: {sent.status}"
+                        else:
+                            reminder.review_requested_at = datetime.utcnow()
+                            db.session.add(
+                                AuditLog(
+                                    actor_user_id=current_user_id(),
+                                    action="maintenance.review_requested",
+                                    details=f"reminder_id={reminder_id} customer={customer.phone}",
+                                )
                             )
-                        )
-                        db.session.commit()
-                        message = f"Review request terkirim ke {customer.name}"
+                            db.session.commit()
+                            message = f"Review request terkirim ke {customer.name}"
 
         # Get all active maintenance reminders (not yet sent or sent but reminder pending)
         reminders = MaintenanceReminder.query.join(Customer).join(Booking).order_by(
             MaintenanceReminder.maintenance_due_at.asc()
         ).all()
 
+        # Pre-fill editable message drafts per reminder so CS/admin can tweak
+        # the text before it's actually sent.
+        reminder_template = get_setting("maintenance_reminder_template", DEFAULT_MAINTENANCE_REMINDER_TEMPLATE)
+        review_template = get_setting("review_request_template", DEFAULT_REVIEW_REQUEST_TEMPLATE)
+        review_link = get_setting("google_maps_business_url", "https://maps.google.com")
+        drafts = {}
+        for reminder in reminders:
+            drafts[reminder.id] = {
+                "reminder_message": reminder_template.format(
+                    nama=reminder.customer.name,
+                    layanan=reminder.service_type,
+                    tanggal_selesai=reminder.completed_at.strftime("%d-%m-%Y"),
+                ),
+                "review_message": review_template.format(
+                    nama=reminder.customer.name,
+                    layanan=reminder.service_type,
+                    link_review=review_link,
+                ),
+            }
+
         return render_template(
             "maintenance.html",
             reminders=reminders,
+            drafts=drafts,
             message=message,
             error=error,
             now=datetime.utcnow(),
+            partial=wants_partial(),
         )
 
     @app.route("/settings", methods=["GET", "POST"])
@@ -1421,6 +1465,8 @@ def create_app() -> Flask:
     def settings():
         message = None
         error = None
+        pairing_code = None
+        pairing_code_instance = None
         setting_keys = ["wa_mode", "booking_done_template", "reschedule_template", "maintenance_reminder_template", "review_request_template", "google_maps_business_url"]
 
         if request.method == "POST":
@@ -1580,6 +1626,55 @@ def create_app() -> Flask:
                         error = "Gagal kirim. Pastikan bridge QR aktif, API key benar, dan session QR sudah tersambung"
                     else:
                         message = f"Pesan test terkirim dengan status: {sent.status}"
+            elif action == "wa_number_add":
+                label = request.form.get("wa_number_label", "").strip()
+                if not label:
+                    error = "Nama/label nomor WhatsApp wajib diisi"
+                else:
+                    ok, status, instance = create_wa_instance(label)
+                    if ok and instance:
+                        db.session.add(
+                            AuditLog(
+                                actor_user_id=current_user_id(),
+                                action="whatsapp.instance.create",
+                                details=f"instance_id={instance.get('id')} label={label}",
+                            )
+                        )
+                        db.session.commit()
+                        message = f"Nomor WhatsApp '{label}' berhasil didaftarkan. Scan QR di bawah untuk menghubungkan."
+                    else:
+                        error = f"Gagal mendaftarkan nomor WhatsApp: {status}"
+            elif action == "wa_number_delete":
+                instance_id = request.form.get("instance_id", "").strip()
+                if not instance_id:
+                    error = "instance_id wajib diisi"
+                else:
+                    ok, status = delete_wa_instance(instance_id)
+                    if ok:
+                        db.session.add(
+                            AuditLog(
+                                actor_user_id=current_user_id(),
+                                action="whatsapp.instance.delete",
+                                details=f"instance_id={instance_id}",
+                            )
+                        )
+                        db.session.commit()
+                        message = "Nomor WhatsApp berhasil dihapus"
+                    else:
+                        error = f"Gagal menghapus nomor WhatsApp: {status}"
+            elif action == "wa_pair_request":
+                phone = request.form.get("pair_phone", "").strip()
+                target_instance = request.form.get("pair_instance_id", "default").strip() or "default"
+                if not phone:
+                    error = "Nomor WhatsApp wajib diisi (contoh: 6281234567890)"
+                else:
+                    ok, status, code = request_wa_pairing_code(phone, target_instance)
+                    if ok:
+                        pairing_code = code
+                        pairing_code_instance = target_instance
+                        message = f"Kode pairing: {code}. Masukkan di HP: WhatsApp > Perangkat Tertaut > Tautkan dengan nomor telepon."
+                    else:
+                        error = f"Gagal meminta kode pairing: {status}"
 
         settings_map = get_many(setting_keys)
         if not settings_map.get("wa_mode"):
@@ -1617,12 +1712,29 @@ def create_app() -> Flask:
         bridge_base = profile.base_url if profile else ""
         bridge_detected = bool(bridge_base)
         bridge_qr_path = profile.qr_path if profile else "/qr"
-        qr_url = f"{bridge_base}{bridge_qr_path}" if (bridge_base and profile and profile.has_qr) else ""
+        # Browser-facing: relative path through nginx's /wa-bridge/ proxy.
+        # bridge_base (e.g. http://wa-bridge:3000) is a Docker-internal
+        # hostname the user's browser can't resolve, so it's never embedded
+        # directly in HTML sent to the browser.
+        qr_url = f"{request.host_url.rstrip('/')}/wa-bridge{bridge_qr_path}" if (bridge_base and profile and profile.has_qr) else ""
         qr_embed_url = ""
         if qr_url:
             ts = int(datetime.utcnow().timestamp())
-            sep = "&" if "?" in qr_url else "?"
-            qr_embed_url = f"{qr_url}{sep}t={ts}"
+            qr_embed_url = f"/wa-bridge{bridge_qr_path}?t={ts}"
+
+        wa_instances = []
+        if bridge_detected:
+            ok_instances, _, wa_instances_raw = list_wa_instances()
+            if ok_instances:
+                for inst in wa_instances_raw:
+                    item = dict(inst)
+                    inst_id = str(inst.get("id") or "")
+                    item["qr_embed_url"] = (
+                        wa_instance_qr_embed_url(inst_id)
+                        if (inst_id and inst.get("has_qr"))
+                        else ""
+                    )
+                    wa_instances.append(item)
 
         return render_template(
             "settings.html",
@@ -1639,6 +1751,10 @@ def create_app() -> Flask:
             bridge_detected_from=profile.detected_from if profile else "",
             qr_url=qr_url,
             qr_embed_url=qr_embed_url,
+            wa_instances=wa_instances,
+            pairing_code=pairing_code,
+            pairing_code_instance=pairing_code_instance,
+            partial=wants_partial(),
         )
 
     @app.post("/api/whatsapp/inbound")
