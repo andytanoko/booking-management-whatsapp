@@ -27,7 +27,7 @@ class BridgeProfile:
     detected_from: str
 
 
-def _request_json(endpoint: str, timeout: float = 1.5) -> dict | None:
+def _request_json(endpoint: str, timeout: float = 5.0) -> dict | None:
     req = request.Request(endpoint, method="GET")
     try:
         with request.urlopen(req, timeout=timeout) as response:
@@ -51,7 +51,7 @@ def _probe_bridge(base_url: str, qr_path: str) -> bool:
     for endpoint in candidates:
         req = request.Request(endpoint, method="GET")
         try:
-            with request.urlopen(req, timeout=1.5) as response:
+            with request.urlopen(req, timeout=3.0) as response:
                 if 200 <= response.status < 500:
                     return True
         except Exception:
@@ -134,7 +134,7 @@ def discover_bridge_profile(extra_candidates: list[str] | None = None) -> Bridge
         endpoint = f"{base_url.rstrip('/')}{path}"
         req = request.Request(endpoint, method="GET")
         try:
-            with request.urlopen(req, timeout=1.5) as response:
+            with request.urlopen(req, timeout=3.0) as response:
                 if 200 <= response.status < 500:
                     qr_path = path
                     break
