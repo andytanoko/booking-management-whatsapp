@@ -8,9 +8,12 @@ RUN apt-get update \
 
 # Trust any corporate/proxy root CAs dropped in certs/ (e.g. a Netskope-style
 # TLS-intercepting proxy) so Chromium can reach real HTTPS hosts behind it.
-# Safe to run with none present — update-ca-certificates just no-ops.
-COPY certs/ /usr/local/share/ca-certificates/extra/
-RUN update-ca-certificates
+# Safe to run with none present — build still succeeds without a certs/ folder.
+RUN mkdir -p /usr/local/share/ca-certificates/extra/ \
+    && if [ -d certs ] && ls certs/*.crt >/dev/null 2>&1; then \
+         cp certs/*.crt /usr/local/share/ca-certificates/extra/; \
+       fi \
+    && update-ca-certificates
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium

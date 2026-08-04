@@ -26,7 +26,6 @@ from app.services.whatsapp import (
     fetch_whatsapp_contacts,
     list_wa_instances,
     log_inbound_message,
-    request_wa_pairing_code,
     send_and_log_message,
     wa_instance_qr_embed_url,
 )
@@ -1465,9 +1464,7 @@ def create_app() -> Flask:
     def settings():
         message = None
         error = None
-        pairing_code = None
-        pairing_code_instance = None
-        setting_keys = ["wa_mode", "booking_done_template", "reschedule_template", "maintenance_reminder_template", "review_request_template", "google_maps_business_url"]
+        setting_keys = ["booking_done_template", "reschedule_template", "maintenance_reminder_template", "review_request_template", "google_maps_business_url"]
 
         if request.method == "POST":
             action = request.form.get("action", "save")
@@ -1578,11 +1575,6 @@ def create_app() -> Flask:
                     db.session.commit()
                     message = f"Layanan '{service.name}' berhasil {status}"
             elif action == "save":
-                wa_mode = request.form.get("wa_mode", "mock").strip().lower()
-                if wa_mode not in {"mock", "bridge"}:
-                    wa_mode = "mock"
-
-                set_setting("wa_mode", wa_mode)
                 auto_public = request.url_root.strip().rstrip("/")
                 set_setting("public_base_url", auto_public)
 
@@ -1610,7 +1602,7 @@ def create_app() -> Flask:
                     AuditLog(
                         actor_user_id=current_user_id(),
                         action="settings.whatsapp.update",
-                        details=f"wa_mode={wa_mode}",
+                        details="bridge-only",
                     )
                 )
                 db.session.commit()
@@ -1662,23 +1654,8 @@ def create_app() -> Flask:
                         message = "Nomor WhatsApp berhasil dihapus"
                     else:
                         error = f"Gagal menghapus nomor WhatsApp: {status}"
-            elif action == "wa_pair_request":
-                phone = request.form.get("pair_phone", "").strip()
-                target_instance = request.form.get("pair_instance_id", "default").strip() or "default"
-                if not phone:
-                    error = "Nomor WhatsApp wajib diisi (contoh: 6281234567890)"
-                else:
-                    ok, status, code = request_wa_pairing_code(phone, target_instance)
-                    if ok:
-                        pairing_code = code
-                        pairing_code_instance = target_instance
-                        message = f"Kode pairing: {code}. Masukkan di HP: WhatsApp > Perangkat Tertaut > Tautkan dengan nomor telepon."
-                    else:
-                        error = f"Gagal meminta kode pairing: {status}"
 
         settings_map = get_many(setting_keys)
-        if not settings_map.get("wa_mode"):
-            settings_map["wa_mode"] = get_setting("wa_mode", app.config.get("WHATSAPP_MODE", "mock"))
         if not settings_map.get("booking_done_template"):
             settings_map["booking_done_template"] = get_setting(
                 "booking_done_template", DEFAULT_BOOKING_DONE_TEMPLATE
@@ -1752,8 +1729,6 @@ def create_app() -> Flask:
             qr_url=qr_url,
             qr_embed_url=qr_embed_url,
             wa_instances=wa_instances,
-            pairing_code=pairing_code,
-            pairing_code_instance=pairing_code_instance,
             partial=wants_partial(),
         )
 

@@ -48,23 +48,10 @@ class TestMockGateway:
 
 
 class TestGetGateway:
-    def test_get_gateway_mock(self, app):
+    def test_get_gateway_always_bridge(self, app):
         with app.app_context():
-            set_setting("wa_mode", "mock")
-            gw = get_gateway()
-            assert isinstance(gw, MockWhatsAppGateway)
-
-    def test_get_gateway_bridge(self, app):
-        with app.app_context():
-            set_setting("wa_mode", "bridge")
             gw = get_gateway()
             assert isinstance(gw, BridgeWhatsAppGateway)
-
-    def test_get_gateway_unknown_defaults_mock(self, app):
-        with app.app_context():
-            set_setting("wa_mode", "weird")
-            gw = get_gateway()
-            assert isinstance(gw, MockWhatsAppGateway)
 
 
 class TestRequestJson:
@@ -250,7 +237,6 @@ class TestFetchContacts:
 class TestSendAndLog:
     def test_send_and_log(self, app):
         with app.app_context():
-            set_setting("wa_mode", "mock")
             msg = send_and_log_message("628123456789", "Hello")
             assert msg is not None
             assert msg.direction == "outbound"

@@ -1165,7 +1165,6 @@ class TestSettingsRoute:
             "/settings",
             data={
                 "action": "save",
-                "wa_mode": "bridge",
                 "booking_done_template": "done {nama}",
                 "reschedule_template": "resc {nama}",
                 "maintenance_reminder_template": "maint {nama}",
@@ -1178,7 +1177,7 @@ class TestSettingsRoute:
     def test_save_invalid_wa_mode_empty_templates(self, session_login, no_bridge):
         resp = session_login.post(
             "/settings",
-            data={"action": "save", "wa_mode": "weird"},
+            data={"action": "save"},
         )
         assert "berhasil disimpan" in resp.get_data(as_text=True)
 

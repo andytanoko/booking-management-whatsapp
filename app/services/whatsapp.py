@@ -247,12 +247,7 @@ class BridgeWhatsAppGateway(WhatsAppGateway):
 
 
 def get_gateway() -> WhatsAppGateway:
-    mode = get_setting("wa_mode", current_app.config.get("WHATSAPP_MODE", "mock")).strip().lower()
-    if mode == "bridge":
-        return BridgeWhatsAppGateway()
-    if mode == "mock":
-        return MockWhatsAppGateway()
-    return MockWhatsAppGateway()
+    return BridgeWhatsAppGateway()
 
 
 def fetch_whatsapp_contacts(saved_only: bool = True) -> tuple[bool, str, list[dict]]:
@@ -347,36 +342,6 @@ def wa_instance_qr_embed_url(instance_id: str) -> str:
     return f"/wa-bridge/instances/{instance_id}/qr?t={ts}"
 
 
-def request_wa_pairing_code(phone: str, instance_id: str = "") -> tuple[bool, str, str]:
-    """Ask the bridge for a WhatsApp 'link with phone number' pairing code,
-    as an alternative to scanning the QR. Returns (ok, status, pairing_code).
-    """
-    base_url = discover_bridge_base_url()
-    if not base_url:
-        return False, "bridge-not-found", ""
-
-    digits = "".join(ch for ch in phone if ch.isdigit())
-    if not digits:
-        return False, "invalid-phone", ""
-
-    path = f"/instances/{instance_id}/pair" if instance_id and instance_id != "default" else "/pair"
-    raw = json.dumps({"phone": digits}).encode("utf-8")
-    req = request.Request(f"{base_url.rstrip('/')}{path}", data=raw, method="POST")
-    req.add_header("Content-Type", "application/json")
-    try:
-        with request.urlopen(req, timeout=15) as response:
-            body = json.loads(response.read().decode("utf-8", errors="ignore") or "{}")
-            if body.get("ok"):
-                return True, "ok", str(body.get("pairing_code") or "")
-            return False, str(body.get("error") or "pair-failed"), ""
-    except error.HTTPError as exc:
-        try:
-            body = json.loads(exc.read().decode("utf-8", errors="ignore") or "{}")
-            return False, str(body.get("error") or f"bridge-http-{exc.code}"), ""
-        except Exception:
-            return False, f"bridge-http-{exc.code}", ""
-    except Exception:
-        return False, "bridge-error", ""
 
 
 def log_inbound_message(

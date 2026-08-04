@@ -1,20 +1,13 @@
 {% extends 'partial.html' if partial else 'base.html' %}
 {% block content %}
 <section class="card">
-  <h2>Settings WhatsApp</h2>
+  <h2>WhatsApp</h2>
   <p>Hubungkan aplikasi ke WhatsApp bridge (QR gateway) agar pesan masuk/keluar berjalan otomatis.</p>
 
   {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 
   <form method="post" class="form-grid two-col">
-    <label>Mode WhatsApp
-      <select name="wa_mode" required>
-        <option value="mock" {% if settings.wa_mode == 'mock' %}selected{% endif %}>Mock (testing internal)</option>
-        <option value="bridge" {% if settings.wa_mode == 'bridge' %}selected{% endif %}>Bridge QR (current WhatsApp)</option>
-      </select>
-    </label>
-
     <div>
       <button type="submit" name="action" value="save">Simpan Settings</button>
     </div>
@@ -222,51 +215,13 @@ function resetServiceForm() {
   <div class="alert error">Bridge belum terdeteksi otomatis. Jalankan service bridge QR pada port 3000.</div>
   {% endif %}
   <ol>
-    <li>Set <b>Mode WhatsApp</b> ke <b>Bridge QR</b>.</li>
+    <li>Pastikan mode WhatsApp menggunakan Bridge QR di konfigurasi server.</li>
     <li>Buka URL QR dari bridge, lalu scan menggunakan WhatsApp bisnis Anda.</li>
     <li>Atur webhook inbound bridge ke URL berikut:</li>
   </ol>
   <p><code>{{ webhook_url }}</code></p>
   {% if qr_url %}
   <p>URL QR bridge (contoh): <code>{{ qr_url }}</code></p>
-  {% endif %}
-</section>
-
-<section class="card">
-  <h2>QR Pairing</h2>
-  {% if bridge_connected %}
-  <div class="alert success">WhatsApp sudah terhubung. QR tidak ditampilkan karena session sudah aktif.</div>
-  <p>Jika ingin ganti akun WhatsApp, logout session dari bridge lalu refresh halaman ini.</p>
-  {% elif qr_embed_url %}
-  <p>Scan QR ini dari WhatsApp pada ponsel Anda. Jika belum muncul, klik refresh.</p>
-  <div class="qr-wrap">
-    <img src="{{ qr_embed_url }}" alt="QR WhatsApp" class="qr-img" />
-  </div>
-  <form method="get">
-    <button type="submit">Refresh QR</button>
-  </form>
-  {% else %}
-  <p>QR belum tersedia. Tunggu bridge menyiapkan QR baru lalu refresh halaman ini.</p>
-  {% endif %}
-
-  {% if not bridge_connected %}
-  <div class="pairing-code-box" style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #eee;">
-    <h3>Atau, Hubungkan dengan Nomor Telepon</h3>
-    <p>Alternatif tanpa scan QR. Masukkan nomor WhatsApp (kode negara + nomor, tanpa <code>+</code> atau <code>0</code> di depan, contoh <code>6281234567890</code>), lalu masukkan kode yang muncul di HP: <b>WhatsApp &gt; Perangkat Tertaut &gt; Tautkan dengan nomor telepon</b>.</p>
-    <form method="post" class="form-grid two-col">
-      <input type="hidden" name="action" value="wa_pair_request" />
-      <input type="hidden" name="pair_instance_id" value="default" />
-      <label>Nomor WhatsApp
-        <input type="text" name="pair_phone" placeholder="6281234567890" pattern="[0-9]{8,15}" required />
-      </label>
-      <div>
-        <button type="submit">Minta Kode Pairing</button>
-      </div>
-    </form>
-    {% if pairing_code and pairing_code_instance == 'default' %}
-    <div class="alert success">Kode pairing: <b style="font-size: 1.4rem; letter-spacing: 2px;">{{ pairing_code }}</b></div>
-    {% endif %}
-  </div>
   {% endif %}
 </section>
 
@@ -321,15 +276,7 @@ function resetServiceForm() {
               {% if inst.connected %}
               -
               {% else %}
-              <form method="post" class="inline-form">
-                <input type="hidden" name="action" value="wa_pair_request" />
-                <input type="hidden" name="pair_instance_id" value="{{ inst.id }}" />
-                <input type="text" name="pair_phone" placeholder="6281234567890" pattern="[0-9]{8,15}" required style="width: 9rem;" />
-                <button type="submit" class="btn-small">Minta Kode</button>
-              </form>
-              {% if pairing_code and pairing_code_instance == inst.id %}
-              <div class="alert success" style="margin: 0.5rem 0 0; display: inline-block;">Kode: <b>{{ pairing_code }}</b></div>
-              {% endif %}
+              Menunggu QR...
               {% endif %}
             </td>
             <td>
