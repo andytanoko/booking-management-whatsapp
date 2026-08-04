@@ -42,7 +42,7 @@
     <small style="grid-column: span 2; color: #666;">Sistem otomatis akan menerjemahkan paket ke layanan yang sesuai. Jika tidak cocok, pilih dari dropdown di atas.</small>
     
     <label>Jadwal Mulai
-      <input type="datetime-local" name="scheduled_start" value="{{ booking.scheduled_start.strftime('%Y-%m-%dT%H:%M') }}" required />
+      <input type="date" name="scheduled_start" value="{{ booking.scheduled_start.strftime('%Y-%m-%d') }}" required />
     </label>
     
     <label>Catatan

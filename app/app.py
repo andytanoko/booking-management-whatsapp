@@ -779,15 +779,19 @@ def create_app() -> Flask:
             
             start_time = None
             try:
-                start_time = datetime.strptime(schedule_raw, "%Y-%m-%dT%H:%M")
+                # Accept either full datetime (from older clients) or date-only.
+                try:
+                    start_time = datetime.strptime(schedule_raw, "%Y-%m-%dT%H:%M")
+                except ValueError:
+                    # date-only input: treat as start of day
+                    start_time = datetime.strptime(schedule_raw, "%Y-%m-%d")
             except ValueError:
                 error = "Format tanggal tidak valid"
 
             if service and start_time and not error:
                 end_time = compute_booking_end(service, start_time)
-                if not is_within_operating_hours(start_time, end_time):
-                    error = "Di luar jam operasional (09:00-18:00)"
-                elif has_conflict(start_time, end_time):
+                # Do not enforce operating hours check when schedule is date-only/user requested removal
+                if has_conflict(start_time, end_time):
                     error = "Jadwal bentrok dengan booking lain"
                 else:
                     customer = Customer.query.filter_by(phone=phone).first()
@@ -885,18 +889,18 @@ def create_app() -> Flask:
 
                     if not error and service:
                         try:
-                            start_time = datetime.strptime(schedule_raw, "%Y-%m-%dT%H:%M")
+                            try:
+                                start_time = datetime.strptime(schedule_raw, "%Y-%m-%dT%H:%M")
+                            except ValueError:
+                                start_time = datetime.strptime(schedule_raw, "%Y-%m-%d")
                         except ValueError:
                             error = "Format tanggal tidak valid"
-                        
+
                         if not error:
                             end_time = compute_booking_end(service, start_time)
-                            
-                            # Check operating hours
-                            if not is_within_operating_hours(start_time, end_time):
-                                error = "Di luar jam operasional (09:00-18:00)"
-                            # Check for conflicts (excluding current booking)
-                            elif has_conflict(start_time, end_time, exclude_booking_id=booking.id):
+
+                            # Do not enforce operating hours; still check conflicts (excluding current booking)
+                            if has_conflict(start_time, end_time, exclude_booking_id=booking.id):
                                 error = "Jadwal bentrok dengan booking lain"
                             else:
                                 # Update customer info
@@ -1333,12 +1337,14 @@ def create_app() -> Flask:
                     error = "Booking tidak dalam status reschedule"
                 else:
                     try:
-                        new_start = datetime.strptime(new_date_str, "%Y-%m-%dT%H:%M")
+                        try:
+                            new_start = datetime.strptime(new_date_str, "%Y-%m-%dT%H:%M")
+                        except ValueError:
+                            new_start = datetime.strptime(new_date_str, "%Y-%m-%d")
                         new_end = compute_booking_end(booking.service_type, new_start)
 
-                        if not is_within_operating_hours(new_start, new_end):
-                            error = "Jadwal baru di luar jam operasional (09:00-18:00)"
-                        elif has_conflict(new_start, new_end, exclude_booking_id=booking.id):
+                        # Do not enforce operating hours; only check conflicts
+                        if has_conflict(new_start, new_end, exclude_booking_id=booking.id):
                             error = "Jadwal baru bentrok dengan booking lain"
                         else:
                             booking.scheduled_start = new_start

@@ -84,9 +84,9 @@
         <input type="hidden" name="action" value="confirm_reschedule" />
         <input type="hidden" name="booking_id" value="{{ item.id }}" />
         <label>Jadwal Baru
-          <input type="datetime-local" name="new_scheduled_start" required />
+          <input type="date" name="new_scheduled_start" required />
         </label>
-        <p class="hint">Customer akan dikonfirmasi dengan jadwal ini. Sistem akan cek konflik dan jam operasional otomatis.</p>
+        <p class="hint">Customer akan dikonfirmasi dengan jadwal ini. Sistem akan cek konflik otomatis.</p>
         <button type="submit" class="btn-primary">✅ Konfirmasi Reschedule</button>
       </form>
     </div>
