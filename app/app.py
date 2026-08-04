@@ -20,6 +20,7 @@ from app.services.reminders import run_due_reminders
 from app.services.settings_store import get_many, get_setting, set_setting
 from app.services.semantic_matcher import match_package_to_service, get_variant_info
 from app.services.whatsapp import (
+    check_whatsapp_number_registered,
     create_wa_instance,
     delete_wa_instance,
     discover_bridge_profile,
@@ -48,7 +49,13 @@ BOOKING_STATUSES = {
     "selesai": "Selesai",
     "reschedule": "Reschedule",
     "cancel": "Cancel",
-    "batal": "Batal",
+}
+
+# Service names used by the "Booking Maintenance" buttons on the maintenance
+# page (key -> ServiceType.name). Also seeded as ServiceType rows on startup.
+MAINTENANCE_BOOKING_SERVICES = {
+    "body_kaca": "Maintenance (body+kaca)",
+    "body_saja": "Maintenance (body saja)",
 }
 
 # Which statuses trigger customer notifications
@@ -96,17 +103,68 @@ DEFAULT_REVIEW_REQUEST_TEMPLATE = (
 )
 
 
+def normalize_whatsapp_number(phone: str) -> str:
+    """Normalize a WhatsApp phone number by stripping non-digits."""
+    digits = re.sub(r"\D", "", str(phone or ""))
+    return digits if 8 <= len(digits) <= 15 else ""
+
+
+def validate_active_whatsapp_number(phone: str) -> str:
+    """Return an error message if a phone fails strict WhatsApp validation.
+
+    Confirmed non-existent numbers are rejected. Empty string means the
+    number passed (including when the bridge check is inconclusive, e.g.
+    the bridge is offline - saves aren't blocked by bridge downtime).
+    """
+    normalized = normalize_whatsapp_number(phone)
+    if not normalized:
+        return "Format nomor WhatsApp tidak valid"
+    registered, _ = check_whatsapp_number_registered(normalized)
+    if registered is False:
+        return "Nomor WhatsApp tidak ditemukan/tidak aktif di WhatsApp"
+    return ""
+
+
 def booking_notify_target(customer) -> str:
     """Resolve where a customer notification should be delivered."""
     if customer is None:
         return ""
-    phone = str(customer.phone or "").strip()
-    if phone.isdigit():
-        return f"{phone}@c.us"
+    normalized_phone = normalize_whatsapp_number(customer.phone or "")
+    if normalized_phone:
+        return f"{normalized_phone}@c.us"
     lid = str(getattr(customer, "lid", "") or "").strip()
     if lid.isdigit():
         return f"{lid}@lid"
     return ""
+
+
+def booking_notify_target_parts(customer) -> tuple[str, str | None]:
+    """Return a numeric phone and optional WhatsApp chat_id for a customer."""
+    if customer is None:
+        return "", None
+    normalized_phone = normalize_whatsapp_number(customer.phone or "")
+    lid = str(getattr(customer, "lid", "") or "").strip()
+    if normalized_phone:
+        return normalized_phone, f"{normalized_phone}@c.us"
+    if lid.isdigit():
+        return "", f"{lid}@lid"
+    return "", None
+
+
+def split_whatsapp_target(target: str) -> tuple[str, str | None]:
+    """Split a WhatsApp delivery target into phone and chat_id parts."""
+    target = str(target or "").strip()
+    if not target:
+        return "", None
+    if "@" not in target:
+        return target, None
+    identity, suffix = target.split("@", 1)
+    suffix = suffix.lower()
+    if suffix == "c.us":
+        return identity, target
+    if suffix == "lid":
+        return "", target
+    return identity, target
 
 
 def booking_done_message(booking) -> str:
@@ -352,26 +410,54 @@ def parse_schedule_text(text: str) -> datetime | None:
 
 
 def create_booking_from_form(form: dict, data: dict) -> Booking | None:
-    """Create (or reuse) a customer and a pending booking from a parsed form."""
+    """Create (or reuse) a customer and a pending booking from a parsed form.
+
+    Applies the same validation rules as a manual booking (vehicle type
+    required, strict WhatsApp number check, schedule conflict check). When a
+    check fails, no booking is created; the failure is only recorded in the
+    audit log so CS can follow up manually from the inbox.
+    """
     phone = _normalize_form_phone(form.get("phone", ""))
     name = (form.get("name") or "").strip() or "Pelanggan WhatsApp"
+    vehicle_type = (form.get("vehicle_type") or "").strip()
     if not phone:
         return None
 
+    def reject(reason: str) -> None:
+        db.session.add(
+            AuditLog(
+                actor_user_id=None,
+                action="booking.from_whatsapp_rejected",
+                details=f"customer={phone} reason={reason}",
+            )
+        )
+        db.session.commit()
+
+    if not vehicle_type:
+        reject("Jenis kendaraan wajib diisi")
+        return None
+
+    existing_customer = Customer.query.filter_by(phone=phone).first()
+    if existing_customer is None:
+        wa_error = validate_active_whatsapp_number(phone)
+        if wa_error:
+            reject(wa_error)
+            return None
+
     # Upsert the customer.
-    customer = Customer.query.filter_by(phone=phone).first()
+    customer = existing_customer
     if customer is None:
         customer = Customer(
             name=name,
             phone=phone,
-            vehicle_info=form.get("vehicle_type") or None,
+            vehicle_info=vehicle_type or None,
             notes=form.get("domicile") or "Dari form WhatsApp",
         )
         db.session.add(customer)
         db.session.flush()
     else:
-        if form.get("vehicle_type") and not customer.vehicle_info:
-            customer.vehicle_info = form.get("vehicle_type")
+        if vehicle_type and not customer.vehicle_info:
+            customer.vehicle_info = vehicle_type
         if name and (
             not customer.name
             or customer.name.startswith("WhatsApp ")
@@ -408,6 +494,17 @@ def create_booking_from_form(form: dict, data: dict) -> Booking | None:
     if duplicate:
         db.session.commit()
         return duplicate
+
+    if has_conflict(start_time, end_time):
+        db.session.add(
+            AuditLog(
+                actor_user_id=None,
+                action="booking.from_whatsapp_rejected",
+                details=f"customer={phone} reason=Slot penuh untuk hari tersebut",
+            )
+        )
+        db.session.commit()
+        return None
 
     detail_lines = ["Booking dari WhatsApp"]
     
@@ -567,6 +664,8 @@ def bootstrap_defaults() -> None:
         ("Glass Polishing", 120),  # 2 jam
         ("Cuci Mobil", 15),  # 15 menit
         ("Lainnya", 120),  # 2 jam - default untuk package yang tidak match
+        (MAINTENANCE_BOOKING_SERVICES["body_kaca"], 120),  # 2 jam
+        (MAINTENANCE_BOOKING_SERVICES["body_saja"], 60),  # 1 jam
     ]
     for name, duration in defaults:
         existing = ServiceType.query.filter_by(name=name).first()
@@ -639,7 +738,8 @@ def create_app() -> Flask:
         error = None
 
         def render_bookings():
-            data = Booking.query.order_by(Booking.scheduled_start.asc()).all()
+            data = Booking.query.filter(~Booking.status.in_(["cancel", "selesai"]))
+            data = data.order_by(Booking.scheduled_start.asc()).all()
             services = ServiceType.query.filter_by(active=True).all()
             notify = {}
             for b in data:
@@ -719,7 +819,7 @@ def create_app() -> Flask:
                             target.split("@", 1)[0], text, chat_id=target
                         )
                         if sent.status == "failed":
-                            error = "Gagal mengirim notifikasi (cek koneksi WhatsApp)"
+                            error = f"Gagal mengirim notifikasi: {sent.status}"
                         else:
                             db.session.add(
                                 AuditLog(
@@ -732,6 +832,46 @@ def create_app() -> Flask:
                             message = f"Notifikasi terkirim ke {booking.customer.name}"
                 return render_bookings()
 
+            if action == "request_reschedule":
+                booking_id = int(request.form.get("booking_id", "0") or 0)
+                new_date_raw = request.form.get("new_scheduled_start", "").strip()
+                booking = Booking.query.get(booking_id)
+                if not booking:
+                    error = "Booking tidak ditemukan"
+                elif booking.status == "reschedule":
+                    error = "Booking sudah dalam status reschedule"
+                else:
+                    if new_date_raw:
+                        try:
+                            try:
+                                new_date = datetime.strptime(new_date_raw, "%Y-%m-%dT%H:%M")
+                            except ValueError:
+                                new_date = datetime.strptime(new_date_raw, "%Y-%m-%d")
+                            requested_date = new_date.strftime("%d-%m-%Y")
+                        except ValueError:
+                            error = "Format tanggal tidak valid"
+                            requested_date = None
+                    else:
+                        requested_date = None
+
+                    if not error:
+                        booking.status = "reschedule"
+                        if requested_date:
+                            note_prefix = f"[Permintaan reschedule: {requested_date}]"
+                            booking.notes = (
+                                f"{note_prefix}\n{booking.notes}" if booking.notes else note_prefix
+                            )
+                        db.session.add(
+                            AuditLog(
+                                actor_user_id=current_user_id(),
+                                action="booking.request_reschedule",
+                                details=f"booking_id={booking.id} requested_date={requested_date or 'none'}",
+                            )
+                        )
+                        db.session.commit()
+                        message = f"Permintaan reschedule untuk booking #{booking.id} berhasil dikirim"
+                return render_bookings()
+
             customer_name = request.form.get("customer_name", "").strip()
             phone = request.form.get("phone", "").strip()
             vehicle_type = request.form.get("vehicle_type", "").strip()
@@ -741,12 +881,19 @@ def create_app() -> Flask:
             schedule_raw = request.form.get("scheduled_start", "").strip()
             notes = request.form.get("notes", "").strip()
 
+            if not customer_name or not phone:
+                error = "Nama pelanggan dan nomor WhatsApp wajib diisi"
+            elif not vehicle_type:
+                error = "Jenis kendaraan wajib diisi"
+
             service = None
             variant_info = None
             lainnya_service = ServiceType.query.filter_by(name="Lainnya").first()
             
             # If package_name is provided, use semantic matching to find the service
-            if package_name and not service_id:
+            if error:
+                pass
+            elif package_name and not service_id:
                 all_services = ServiceType.query.filter_by(active=True).all()
                 matched_service = match_package_to_service(package_name, all_services)
                 
@@ -792,9 +939,15 @@ def create_app() -> Flask:
                 end_time = compute_booking_end(service, start_time)
                 # Do not enforce operating hours check when schedule is date-only/user requested removal
                 if has_conflict(start_time, end_time):
-                    error = "Jadwal bentrok dengan booking lain"
+                    error = "Slot penuh untuk hari tersebut"
                 else:
                     customer = Customer.query.filter_by(phone=phone).first()
+                    if not customer:
+                        wa_error = validate_active_whatsapp_number(phone)
+                        if wa_error:
+                            error = wa_error
+
+                if not error:
                     if not customer:
                         customer = Customer(name=customer_name, phone=phone, vehicle_info=vehicle_type)
                         db.session.add(customer)
@@ -858,6 +1011,8 @@ def create_app() -> Flask:
                 # Validate customer data
                 if not customer_name or not phone:
                     error = "Nama pelanggan dan nomor WhatsApp wajib diisi"
+                elif not vehicle_type:
+                    error = "Jenis kendaraan wajib diisi"
                 elif not schedule_raw:
                     error = "Jadwal wajib diisi"
                 else:
@@ -901,44 +1056,50 @@ def create_app() -> Flask:
 
                             # Do not enforce operating hours; still check conflicts (excluding current booking)
                             if has_conflict(start_time, end_time, exclude_booking_id=booking.id):
-                                error = "Jadwal bentrok dengan booking lain"
+                                error = "Slot penuh untuk hari tersebut"
                             else:
-                                # Update customer info
                                 customer = booking.customer
-                                customer.name = customer_name
-                                
-                                # Check if phone number is being changed to a duplicate
+
+                                # If the phone now matches another existing customer,
+                                # that's the same real person under a different record -
+                                # re-link the booking to it instead of rejecting the edit.
+                                target_customer = customer
+                                existing_customer = None
                                 if customer.phone != phone:
                                     existing_customer = Customer.query.filter(
                                         Customer.phone == phone,
                                         Customer.id != customer.id
                                     ).first()
                                     if existing_customer:
-                                        error = "Nomor WhatsApp sudah terdaftar untuk customer lain"
-                                
-                                if not error:
-                                    customer.phone = phone
-                                    customer.vehicle_info = vehicle_type or None
-                                    
-                                    # Update booking info
-                                    booking.service_type_id = service.id
-                                    booking.scheduled_start = start_time
-                                    booking.scheduled_end = end_time
-                                    booking.notes = notes
-                                    booking.other_info = package_name
-                                    booking.vehicle_type = vehicle_type
-                                    booking.license_plate = license_plate
-                                    
-                                    db.session.add(
-                                        AuditLog(
-                                            actor_user_id=current_user_id(),
-                                            action="booking.edit",
-                                            details=f"booking_id={booking.id} customer={customer.phone} service={service.name}",
-                                        )
+                                        target_customer = existing_customer
+                                        booking.customer_id = existing_customer.id
+                                    else:
+                                        error = validate_active_whatsapp_number(phone)
+
+                            if not error:
+                                target_customer.name = customer_name
+                                target_customer.phone = phone
+                                target_customer.vehicle_info = vehicle_type or None
+
+                                # Update booking info
+                                booking.service_type_id = service.id
+                                booking.scheduled_start = start_time
+                                booking.scheduled_end = end_time
+                                booking.notes = notes
+                                booking.other_info = package_name
+                                booking.vehicle_type = vehicle_type
+                                booking.license_plate = license_plate
+
+                                db.session.add(
+                                    AuditLog(
+                                        actor_user_id=current_user_id(),
+                                        action="booking.edit",
+                                        details=f"booking_id={booking.id} customer={target_customer.phone} service={service.name}",
                                     )
-                                    db.session.commit()
-                                    message = "Booking berhasil diperbarui"
-                                    return redirect(url_for("bookings"))
+                                )
+                                db.session.commit()
+                                message = "Booking berhasil diperbarui"
+                                return redirect(url_for("bookings"))
 
         return render_template(
             "edit_booking.html",
@@ -996,7 +1157,10 @@ def create_app() -> Flask:
                         customer = Customer.query.get(customer_id)
                         if not customer:
                             error = "Kontak tidak ditemukan"
-                        else:
+                        elif customer.phone != phone:
+                            error = validate_active_whatsapp_number(phone)
+
+                        if not error and customer:
                             customer.name = name
                             customer.phone = phone
                             customer.vehicle_info = vehicle or None
@@ -1011,22 +1175,24 @@ def create_app() -> Flask:
                             db.session.commit()
                             message = "Kontak berhasil diperbarui"
                     else:
-                        customer = Customer(
-                            name=name,
-                            phone=phone,
-                            vehicle_info=vehicle or None,
-                            notes=notes or None,
-                        )
-                        db.session.add(customer)
-                        db.session.add(
-                            AuditLog(
-                                actor_user_id=current_user_id(),
-                                action="customer.create",
-                                details=f"phone={phone}",
+                        error = validate_active_whatsapp_number(phone)
+                        if not error:
+                            customer = Customer(
+                                name=name,
+                                phone=phone,
+                                vehicle_info=vehicle or None,
+                                notes=notes or None,
                             )
-                        )
-                        db.session.commit()
-                        message = "Kontak berhasil ditambahkan"
+                            db.session.add(customer)
+                            db.session.add(
+                                AuditLog(
+                                    actor_user_id=current_user_id(),
+                                    action="customer.create",
+                                    details=f"phone={phone}",
+                                )
+                            )
+                            db.session.commit()
+                            message = "Kontak berhasil ditambahkan"
 
         search = request.args.get("q", "").strip()
         query = Customer.query
@@ -1268,6 +1434,52 @@ def create_app() -> Flask:
         ok = message.status not in {"failed"}
         return jsonify({"ok": ok, "status": message.status, "message": view})
 
+    @app.route("/history", methods=["GET"])
+    @require_roles("admin", "cs")
+    def history():
+        data = Booking.query.filter(Booking.status.in_(["cancel", "selesai"]))
+        data = data.order_by(Booking.scheduled_start.asc()).all()
+        return render_template(
+            "history.html",
+            bookings=data,
+            statuses=BOOKING_STATUSES,
+            partial=wants_partial(),
+        )
+
+    @app.route("/whatsapp-followups", methods=["GET"])
+    @require_roles("admin", "cs")
+    def whatsapp_followups():
+        """Bookings a WhatsApp customer tried to submit that failed strict
+        validation (bad vehicle type / unregistered number / full slot) - CS
+        needs to see these to follow up manually since no booking was created."""
+        logs = (
+            AuditLog.query.filter_by(action="booking.from_whatsapp_rejected")
+            .order_by(AuditLog.id.desc())
+            .limit(200)
+            .all()
+        )
+        followups = []
+        for log in logs:
+            details = log.details or ""
+            m = re.match(r"customer=(\S*)\s+reason=(.*)", details)
+            phone = m.group(1) if m else ""
+            reason = m.group(2) if m else details
+            customer = Customer.query.filter_by(phone=phone).first() if phone else None
+            followups.append(
+                {
+                    "id": log.id,
+                    "created_at": log.created_at,
+                    "phone": phone,
+                    "reason": reason,
+                    "customer_name": customer.name if customer else "",
+                }
+            )
+        return render_template(
+            "whatsapp_followups.html",
+            followups=followups,
+            partial=wants_partial(),
+        )
+
     @app.route("/reschedule", methods=["GET", "POST"])
     @require_roles("admin", "cs")
     def reschedule():
@@ -1299,7 +1511,11 @@ def create_app() -> Flask:
             if action == "send_reminder":
                 booking_id = int(request.form.get("booking_id", "0") or 0)
                 text = request.form.get("message", "").strip()
+                new_date_str = request.form.get("new_scheduled_start", "").strip()
                 booking = Booking.query.get(booking_id)
+                new_start = None
+                new_end = None
+
                 if not booking:
                     error = "Booking tidak ditemukan"
                 elif not text:
@@ -1309,21 +1525,49 @@ def create_app() -> Flask:
                     if not target:
                         error = "Nomor WhatsApp customer tidak tersedia"
                     else:
-                        sent = send_and_log_message(
-                            target.split("@", 1)[0], text, chat_id=target
-                        )
-                        if sent.status == "failed":
-                            error = "Gagal mengirim reminder (cek koneksi WhatsApp)"
-                        else:
-                            db.session.add(
-                                AuditLog(
-                                    actor_user_id=current_user_id(),
-                                    action="booking.reschedule_reminder",
-                                    details=f"booking_id={booking.id} to={target.split('@', 1)[0]}",
-                                )
-                            )
-                            db.session.commit()
-                            message = f"Reminder terkirim ke {booking.customer.name}"
+                        if new_date_str:
+                            try:
+                                try:
+                                    new_start = datetime.strptime(new_date_str, "%Y-%m-%dT%H:%M")
+                                except ValueError:
+                                    new_start = datetime.strptime(new_date_str, "%Y-%m-%d")
+                                new_end = compute_booking_end(booking.service_type, new_start)
+                                if has_conflict(new_start, new_end, exclude_booking_id=booking.id):
+                                    error = "Slot penuh untuk hari tersebut"
+                            except ValueError:
+                                error = "Format tanggal tidak valid"
+
+                        if not error:
+                            phone_target, chat_id_target = booking_notify_target_parts(booking.customer)
+                            if not phone_target and not chat_id_target:
+                                error = "Nomor WhatsApp customer tidak tersedia"
+                            else:
+                                sent = send_and_log_message(phone_target, text, chat_id=chat_id_target)
+                                if sent.status == "failed":
+                                    error = f"Gagal mengirim reminder: {sent.status}"
+                                else:
+                                    if new_start is not None:
+                                        booking.scheduled_start = new_start
+                                        booking.scheduled_end = new_end
+                                        booking.status = "dikonfirmasi"
+                                        db.session.add(
+                                            AuditLog(
+                                                actor_user_id=current_user_id(),
+                                                action="booking.reschedule_confirm",
+                                                details=f"booking_id={booking.id} new_start={new_start.isoformat()}",
+                                            )
+                                        )
+                                        message = f"Reminder terkirim ke {booking.customer.name} dan booking dikonfirmasi"
+                                    else:
+                                        db.session.add(
+                                            AuditLog(
+                                                actor_user_id=current_user_id(),
+                                                action="booking.reschedule_reminder",
+                                                details=f"booking_id={booking.id} to={target.split('@', 1)[0]}",
+                                            )
+                                        )
+                                        message = f"Reminder terkirim ke {booking.customer.name}"
+                                    db.session.commit()
                 return render_reschedules()
 
             if action == "confirm_reschedule":
@@ -1345,7 +1589,7 @@ def create_app() -> Flask:
 
                         # Do not enforce operating hours; only check conflicts
                         if has_conflict(new_start, new_end, exclude_booking_id=booking.id):
-                            error = "Jadwal baru bentrok dengan booking lain"
+                            error = "Slot penuh untuk hari tersebut"
                         else:
                             booking.scheduled_start = new_start
                             booking.scheduled_end = new_end
@@ -1430,6 +1674,57 @@ def create_app() -> Flask:
                             db.session.commit()
                             message = f"Review request terkirim ke {customer.name}"
 
+            elif action == "book_maintenance":
+                reminder_id = int(request.form.get("reminder_id", "0") or 0)
+                service_key = request.form.get("service_key", "").strip()
+                service_name = MAINTENANCE_BOOKING_SERVICES.get(service_key)
+                reminder = MaintenanceReminder.query.get(reminder_id)
+                if not reminder:
+                    error = "Maintenance reminder tidak ditemukan"
+                elif not service_name:
+                    error = "Layanan maintenance tidak valid"
+                else:
+                    service = ServiceType.query.filter_by(name=service_name).first()
+                    if not service:
+                        error = f"Layanan '{service_name}' belum tersedia di Settings"
+                    else:
+                        schedule_raw = request.form.get("scheduled_start", "").strip()
+                        try:
+                            start_time = datetime.strptime(schedule_raw, "%Y-%m-%d")
+                        except ValueError:
+                            start_time = None
+                            error = "Tanggal booking wajib diisi dengan format yang valid"
+
+                    if not error and service and reminder:
+                        customer = reminder.customer
+                        original_booking = reminder.booking
+                        end_time = compute_booking_end(service, start_time)
+                        new_booking = Booking(
+                            customer_id=customer.id,
+                            service_type_id=service.id,
+                            scheduled_start=start_time,
+                            scheduled_end=end_time,
+                            status="dikonfirmasi",
+                            source="maintenance",
+                            notes=f"Booking maintenance dari reminder #{reminder.id}",
+                            vehicle_type=(original_booking.vehicle_type if original_booking else None) or customer.vehicle_info,
+                            license_plate=original_booking.license_plate if original_booking else None,
+                            created_by_user_id=current_user_id(),
+                        )
+                        db.session.add(new_booking)
+                        db.session.add(
+                            AuditLog(
+                                actor_user_id=current_user_id(),
+                                action="maintenance.booking_created",
+                                details=f"reminder_id={reminder.id} customer={customer.phone} service={service.name}",
+                            )
+                        )
+                        db.session.commit()
+                        message = (
+                            f"Booking '{service.name}' berhasil dibuat untuk {customer.name}. "
+                            "Atur tanggal jadwalnya di halaman Bookings."
+                        )
+
         # Get all active maintenance reminders (not yet sent or sent but reminder pending)
         reminders = MaintenanceReminder.query.join(Customer).join(Booking).order_by(
             MaintenanceReminder.maintenance_due_at.asc()
@@ -1470,7 +1765,14 @@ def create_app() -> Flask:
     def settings():
         message = None
         error = None
-        setting_keys = ["booking_done_template", "reschedule_template", "maintenance_reminder_template", "review_request_template", "google_maps_business_url"]
+        setting_keys = [
+            "booking_done_template",
+            "reschedule_template",
+            "maintenance_reminder_template",
+            "review_request_template",
+            "google_maps_business_url",
+            "daily_capacity",
+        ]
 
         if request.method == "POST":
             action = request.form.get("action", "save")
@@ -1600,6 +1902,14 @@ def create_app() -> Flask:
                 if review_request_template:
                     set_setting("review_request_template", review_request_template)
 
+                daily_capacity = request.form.get("daily_capacity", "").strip()
+                if daily_capacity:
+                    try:
+                        int(daily_capacity)
+                        set_setting("daily_capacity", daily_capacity)
+                    except ValueError:
+                        error = "Daily capacity harus berupa angka bulat"
+
                 google_maps_business_url = request.form.get("google_maps_business_url", "").strip()
                 if google_maps_business_url:
                     set_setting("google_maps_business_url", google_maps_business_url)
@@ -1678,6 +1988,8 @@ def create_app() -> Flask:
             settings_map["review_request_template"] = get_setting(
                 "review_request_template", DEFAULT_REVIEW_REQUEST_TEMPLATE
             )
+        if not settings_map.get("daily_capacity"):
+            settings_map["daily_capacity"] = get_setting("daily_capacity", "4")
         if not settings_map.get("google_maps_business_url"):
             settings_map["google_maps_business_url"] = get_setting("google_maps_business_url", "")
 

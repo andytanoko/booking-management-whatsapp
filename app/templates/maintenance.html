@@ -66,6 +66,40 @@
                   <button type="submit" class="btn-secondary">Kirim ke {{ reminder.customer.name }}</button>
                 </form>
               </details>
+              <button type="button" class="btn-secondary" style="margin-top: 6px;" onclick="document.getElementById('dlg-body_kaca-{{ reminder.id }}').showModal()">Booking Maintenance (body+kaca)</button>
+              <button type="button" class="btn-secondary" style="margin-top: 6px;" onclick="document.getElementById('dlg-body_saja-{{ reminder.id }}').showModal()">Booking Maintenance (body saja)</button>
+
+              <dialog id="dlg-body_kaca-{{ reminder.id }}" class="booking-date-dialog">
+                <form method="post">
+                  <input type="hidden" name="action" value="book_maintenance" />
+                  <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
+                  <input type="hidden" name="service_key" value="body_kaca" />
+                  <p>Tanggal booking Maintenance (body+kaca) untuk <strong>{{ reminder.customer.name }}</strong></p>
+                  <label>Tanggal Booking
+                    <input type="date" name="scheduled_start" required />
+                  </label>
+                  <div class="dialog-actions">
+                    <button type="submit" class="btn-secondary">Simpan Booking</button>
+                    <button type="button" class="btn-secondary" onclick="this.closest('dialog').close()">Batal</button>
+                  </div>
+                </form>
+              </dialog>
+
+              <dialog id="dlg-body_saja-{{ reminder.id }}" class="booking-date-dialog">
+                <form method="post">
+                  <input type="hidden" name="action" value="book_maintenance" />
+                  <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
+                  <input type="hidden" name="service_key" value="body_saja" />
+                  <p>Tanggal booking Maintenance (body saja) untuk <strong>{{ reminder.customer.name }}</strong></p>
+                  <label>Tanggal Booking
+                    <input type="date" name="scheduled_start" required />
+                  </label>
+                  <div class="dialog-actions">
+                    <button type="submit" class="btn-secondary">Simpan Booking</button>
+                    <button type="button" class="btn-secondary" onclick="this.closest('dialog').close()">Batal</button>
+                  </div>
+                </form>
+              </dialog>
             </td>
           </tr>
           {% endfor %}

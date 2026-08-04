@@ -191,6 +191,20 @@ function resetServiceForm() {
 </section>
 
 <section class="card">
+  <h2>Daily Capacity Booking</h2>
+  <p>Atur berapa mobil maksimal yang dapat dilayani per hari. Defaultnya 4.</p>
+  <form method="post" class="form-grid">
+    <label>Kapastias per hari
+      <input type="number" name="daily_capacity" value="{{ settings.daily_capacity or '4' }}" min="0" />
+    </label>
+    <p class="hint">Masukkan 0 untuk menggunakan logika bentrok lama berdasarkan overlap waktu.</p>
+    <div>
+      <button type="submit" name="action" value="save">Simpan Capacity</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
   <h2>Konfigurasi Google Maps</h2>
   <p>URL bisnis Google Maps Anda untuk diminta review dari customer. Akan digunakan di template review request.</p>
   <form method="post" class="form-grid">

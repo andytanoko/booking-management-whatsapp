@@ -238,6 +238,29 @@ button.btn-danger {
   color: #8a1c13;
 }
 
+.booking-date-dialog {
+  border: none;
+  border-radius: 8px;
+  padding: 20px;
+  min-width: 280px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.booking-date-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.booking-date-dialog label {
+  display: block;
+  margin-top: 10px;
+}
+
+.booking-date-dialog .dialog-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
 .search-bar {
   display: flex;
   gap: 8px;

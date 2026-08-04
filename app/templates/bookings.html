@@ -6,34 +6,34 @@
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
   <form method="post" class="form-grid two-col">
     <label>Nama Pelanggan
-      <input type="text" name="customer_name" required />
+      <input type="text" name="customer_name" value="{{ request.form.get('customer_name', '') if error else request.args.get('customer_name', '') }}" required />
     </label>
     <label>Nomor WhatsApp
-      <input type="text" name="phone" required />
+      <input type="text" name="phone" value="{{ request.form.get('phone', '') if error else request.args.get('phone', '') }}" required />
     </label>
     <label>Kendaraan (Merk & Type)
-      <input type="text" name="vehicle_type" placeholder="Contoh: Toyota Rush GR" />
+      <input type="text" name="vehicle_type" value="{{ request.form.get('vehicle_type', '') if error else '' }}" placeholder="Contoh: Toyota Rush GR" required />
     </label>
     <label>Nomor Polisi
-      <input type="text" name="license_plate" placeholder="Contoh: B1234XYZ" />
+      <input type="text" name="license_plate" value="{{ request.form.get('license_plate', '') if error else '' }}" placeholder="Contoh: B1234XYZ" />
     </label>
     <label>Layanan
       <select name="service_id">
         <option value="">-- Pilih dari daftar --</option>
         {% for service in services %}
-        <option value="{{ service.id }}">{{ service.name }}</option>
+        <option value="{{ service.id }}" {% if error and request.form.get('service_id')|string == service.id|string %}selected{% endif %}>{{ service.name }}</option>
         {% endfor %}
       </select>
     </label>
     <label>Atau masukkan Nama Paket
-      <input type="text" name="package_name" placeholder="Contoh: medium gold, PPF premium, coating silver" />
+      <input type="text" name="package_name" value="{{ request.form.get('package_name', '') if error else '' }}" placeholder="Contoh: medium gold, PPF premium, coating silver" />
     </label>
     <small style="grid-column: span 2; color: #666;">Sistem otomatis akan menerjemahkan paket ke layanan yang sesuai. Jika tidak cocok, pilih dari dropdown di atas.</small>
     <label>Jadwal
-      <input type="date" name="scheduled_start" required />
+      <input type="date" name="scheduled_start" value="{{ request.form.get('scheduled_start', '') if error else '' }}" required />
     </label>
     <label>Catatan
-      <input type="text" name="notes" />
+      <input type="text" name="notes" value="{{ request.form.get('notes', '') if error else '' }}" />
     </label>
     <button type="submit">Simpan Booking</button>
   </form>
@@ -76,18 +76,32 @@
           </td>
           <td>{{ item.source }}</td>
           <td>
+            {% if item.status in ['kendaraan_masuk', 'dikerjakan', 'qc', 'siap_diambil', 'selesai'] %}
+            <span class="btn-link disabled" style="opacity:0.5; cursor:not-allowed;">✏️ Edit</span>
+            {% else %}
             <a href="{{ url_for('edit_booking', booking_id=item.id) }}" class="btn-link">✏️ Edit</a>
-            <br />
-            <form method="post" class="status-form">
+            {% endif %}
+            <form method="post" class="status-form" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-top:0.75rem;">
               <input type="hidden" name="action" value="update_status" />
               <input type="hidden" name="booking_id" value="{{ item.id }}" />
-              <select name="status">
+              <select name="status" {% if item.status == 'reschedule' %}disabled{% endif %}>
                 {% for key, label in statuses.items() %}
-                <option value="{{ key }}" {% if key == item.status %}selected{% endif %}>{{ label }}</option>
+                  {% if not (key == 'reschedule' and item.status != 'reschedule') %}
+                    <option value="{{ key }}" {% if key == item.status %}selected{% endif %} {% if key == 'reschedule' %}disabled{% endif %}>{{ label }}</option>
+                  {% endif %}
                 {% endfor %}
               </select>
-              <button type="submit" class="btn-secondary">Update</button>
-            </form>
+              <button type="submit" class="btn-secondary" {% if item.status == 'reschedule' %}disabled{% endif %}>Update</button>
+              {% if item.status != 'reschedule' %}
+              </form>
+              <form method="post" style="display:inline; margin-left:0.5rem;">
+                <input type="hidden" name="action" value="request_reschedule" />
+                <input type="hidden" name="booking_id" value="{{ item.id }}" />
+                <button type="submit" class="btn-secondary">🔁 Reschedule</button>
+              </form>
+              {% else %}
+              <span class="status-badge status-reschedule">Menunggu Reschedule</span>
+              {% endif %}
           </td>
         </tr>
         {% if item.status == 'selesai' and notify and notify.get(item.id) %}
@@ -114,4 +128,5 @@
     </table>
   </div>
 </section>
+
 {% endblock %}

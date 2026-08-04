@@ -1,0 +1,44 @@
+{% extends 'partial.html' if partial else 'base.html' %}
+{% block content %}
+<section class="card">
+  <h2>Riwayat Booking</h2>
+  <p>Menampilkan booking yang sudah selesai atau dibatalkan.</p>
+</section>
+
+{% if bookings %}
+<section class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Pelanggan</th>
+          <th>Layanan</th>
+          <th>Jadwal</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in bookings %}
+        <tr>
+          <td>{{ item.id }}</td>
+          <td>{{ item.customer.name }}<br /><small>{{ item.customer.phone }}</small></td>
+          <td>{{ item.service_type.name }}</td>
+          <td>{{ item.scheduled_start.strftime('%d-%m-%Y %H:%M') }}</td>
+          <td>
+            <span class="status-badge status-{{ item.status }}">
+              {{ statuses.get(item.status, item.status) }}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
+<section class="card">
+  <div class="alert info">Belum ada booking yang selesai atau dibatalkan.</div>
+</section>
+{% endif %}
+{% endblock %}

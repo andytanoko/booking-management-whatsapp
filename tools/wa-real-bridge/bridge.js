@@ -403,6 +403,63 @@ async function requestPairingCodeFor(inst, req, res) {
   }
 }
 
+async function resolveLidToCUs(client, lidTarget) {
+  const lid = String(lidTarget || '').trim().split('@')[0] || '';
+  if (!lid) {
+    return '';
+  }
+
+  try {
+    const contact = await client.getContactById(`${lid}@lid`);
+    const candidate = extractContactNumber(contact);
+    if (candidate) {
+      return `${candidate}@c.us`;
+    }
+  } catch (err) {
+    // Ignore and fallback to scanning all contacts.
+  }
+
+  try {
+    const contacts = await client.getContacts();
+    for (const c of contacts) {
+      const server = c?.id?.server || '';
+      const idUser = String((c?.id && c.id.user) || '').replace(/[^0-9]/g, '');
+      if (server === 'lid' && idUser === lid) {
+        const candidate = extractContactNumber(c);
+        if (candidate) {
+          return `${candidate}@c.us`;
+        }
+      }
+    }
+  } catch (err) {
+    // Ignore if contact scan fails.
+  }
+
+  return '';
+}
+
+// Sending straight to a raw "<number>@c.us" JID can fail with "No LID for
+// user" when WhatsApp Web hasn't cached that contact's LID mapping yet.
+// Calling getNumberId() first forces WhatsApp Web to resolve/cache it.
+// If getNumberId() resolves to null (no exception), the number is simply not
+// registered on WhatsApp — surface that clearly instead of a doomed send.
+async function resolveSendTargetId(client, targetId) {
+  if (!targetId.endsWith('@c.us')) {
+    return { targetId };
+  }
+  const number = targetId.split('@')[0];
+  try {
+    const numberId = await client.getNumberId(number);
+    if (numberId && numberId._serialized) {
+      return { targetId: numberId._serialized };
+    }
+    return { targetId, notRegistered: true };
+  } catch (err) {
+    // Lookup itself failed (e.g. transient error); fall back to the raw JID.
+    return { targetId };
+  }
+}
+
 async function sendMessageFor(inst, req, res) {
   const phone = String(req.body.phone || '').trim();
   const chatIdFromBody = String(req.body.chat_id || '').trim();
@@ -416,20 +473,70 @@ async function sendMessageFor(inst, req, res) {
     return res.status(409).json({ ok: false, error: 'wa_not_connected' });
   }
 
+  const normalizedPhone = phone.replace(/[^0-9]/g, '');
   let chatId = chatIdFromBody;
   if (!chatId) {
-    if (!phone) {
+    if (!normalizedPhone) {
       return res.status(400).json({ ok: false, error: 'phone or chat_id is required' });
     }
-    const normalized = phone.replace(/[^0-9]/g, '');
-    chatId = `${normalized}@c.us`;
+    chatId = `${normalizedPhone}@c.us`;
+  }
+
+  async function attemptSend(targetId) {
+    const msg = await inst.client.sendMessage(targetId, text);
+    return msg?.id?._serialized ?? msg?._serialized ?? null;
+  }
+
+  async function sendWithFallback(targetId) {
+    const resolved = await resolveSendTargetId(inst.client, targetId);
+    if (resolved.notRegistered) {
+      throw new Error(`number_not_on_whatsapp: ${targetId}`);
+    }
+    const resolvedId = resolved.targetId;
+    try {
+      return await attemptSend(resolvedId);
+    } catch (err) {
+      const errMsg = String(err?.message || err || 'send_failed');
+      if (resolvedId.endsWith('@lid') || targetId.endsWith('@lid')) {
+        const fallbackId = await resolveLidToCUs(inst.client, resolvedId.endsWith('@lid') ? resolvedId : targetId);
+        if (fallbackId) {
+          try {
+            const fallbackMsgId = await attemptSend(fallbackId);
+            return fallbackMsgId;
+          } catch (fallbackErr) {
+            throw new Error(`${errMsg}; fallback=${String(fallbackErr?.message || fallbackErr || 'send_failed')}`);
+          }
+        }
+      }
+      throw err;
+    }
   }
 
   try {
-    const msg = await inst.client.sendMessage(chatId, text);
-    return res.json({ ok: true, status: 'sent', id: msg.id?._serialized || null });
+    const messageId = await sendWithFallback(chatId);
+    return res.json({ ok: true, status: 'sent', id: messageId });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message || 'send_failed' });
+    const errMsg = String(err?.message || err || 'send_failed');
+    return res.status(500).json({ ok: false, error: errMsg });
+  }
+}
+
+// Strict validation for save-time checks: confirms a number is a real,
+// active WhatsApp account (not just a plausible-looking digit string).
+async function checkNumberFor(inst, req, res) {
+  const phone = String(req.body.phone || '').replace(/[^0-9]/g, '');
+  if (!isPlausiblePhone(phone)) {
+    return res.status(400).json({ ok: false, error: 'invalid_phone' });
+  }
+  if (!inst.ready) {
+    return res.status(409).json({ ok: false, error: 'wa_not_connected' });
+  }
+  try {
+    const numberId = await inst.client.getNumberId(phone);
+    const registered = !!(numberId && numberId._serialized);
+    return res.json({ ok: true, registered, serialized: registered ? numberId._serialized : null });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err?.message || err || 'check_failed') });
   }
 }
 
@@ -483,6 +590,14 @@ app.post('/instances/:id/send-message', async (req, res) => {
     return res.status(404).json({ ok: false, error: 'instance_not_found' });
   }
   await sendMessageFor(inst, req, res);
+});
+
+app.post('/instances/:id/check-number', async (req, res) => {
+  const inst = instances.get(req.params.id);
+  if (!inst) {
+    return res.status(404).json({ ok: false, error: 'instance_not_found' });
+  }
+  await checkNumberFor(inst, req, res);
 });
 
 app.post('/instances/:id/pair', async (req, res) => {
@@ -673,6 +788,14 @@ app.post('/send-message', async (req, res) => {
     return res.status(404).json({ ok: false, error: 'default_instance_missing' });
   }
   await sendMessageFor(inst, req, res);
+});
+
+app.post('/check-number', async (req, res) => {
+  const inst = instances.get(DEFAULT_INSTANCE_ID);
+  if (!inst) {
+    return res.status(404).json({ ok: false, error: 'default_instance_missing' });
+  }
+  await checkNumberFor(inst, req, res);
 });
 
 app.listen(PORT, async () => {
