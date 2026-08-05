@@ -1,23 +1,13 @@
 {% extends 'partial.html' if partial else 'base.html' %}
 {% from '_icons.html' import icon %}
 {% block content %}
-<section class="card">
-  <div class="card-header">{{ icon('whatsapp') }}<h2>WhatsApp</h2></div>
-  <p>Hubungkan aplikasi ke WhatsApp bridge (QR gateway) agar pesan masuk/keluar berjalan otomatis.</p>
-
-  {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
-  {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
-
-  <form method="post" class="form-grid two-col">
-    <div class="form-actions">
-      <button type="submit" name="action" value="save">{{ icon('save') }} Simpan Settings</button>
-    </div>
-  </form>
-</section>
+{% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
 
 <section class="card">
   <div class="card-header">{{ icon('sliders') }}<h2>Manajemen Layanan</h2></div>
   <p>Tambah, edit, atau hapus layanan (jasa) yang ditawarkan beserta durasi pengerjaan.</p>
+
 
   {% if services %}
   <div class="table-wrap">
