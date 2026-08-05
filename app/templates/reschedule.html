@@ -1,7 +1,8 @@
 {% extends 'partial.html' if partial else 'base.html' %}
+{% from '_icons.html' import icon %}
 {% block content %}
 <section class="card">
-  <h2>Manajemen Reschedule Booking</h2>
+  <div class="card-header">{{ icon('repeat') }}<h2>Manajemen Reschedule Booking</h2></div>
   <p>Lihat dan kelola permintaan reschedule dari customer. Kirim reminder jadwal baru dan konfirmasi perubahan.</p>
   {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
@@ -9,7 +10,7 @@
 
 {% if reschedules %}
 <section class="card">
-  <h2>Booking yang Perlu Reschedule</h2>
+  <div class="card-header">{{ icon('list') }}<h2>Booking yang Perlu Reschedule</h2></div>
   <div class="table-wrap">
     <table>
       <thead>
@@ -29,8 +30,8 @@
           <td>{{ item.service_type.name }}</td>
           <td>{{ item.scheduled_start.strftime('%d-%m-%Y %H:%M') }}</td>
           <td>
-            <button type="button" class="btn-secondary toggle-reschedule-btn" data-toggle-booking="{{ item.id }}" onclick="toggleRescheduleRow({{ item.id }})">
-              📤 Buka Penjadwalan
+            <button type="button" class="btn-small btn-secondary toggle-reschedule-btn" data-toggle-booking="{{ item.id }}" onclick="toggleRescheduleRow({{ item.id }})">
+              {{ icon('repeat') }}<span class="toggle-label">Buka Penjadwalan</span>
             </button>
           </td>
         </tr>
@@ -41,7 +42,7 @@
 </section>
 
 <section class="card">
-  <h2>Proses Reschedule Detail</h2>
+  <div class="card-header">{{ icon('edit') }}<h2>Proses Reschedule Detail</h2></div>
   {% for item in reschedules %}
   <div id="form-{{ item.id }}" style="display:none; margin-bottom: 2rem; padding: 1rem; border: 1px solid #ddd; border-radius: 4px;">
     <h3>Booking #{{ item.id }} - {{ item.customer.name }}</h3>
@@ -61,9 +62,9 @@
         </label>
         <p class="hint">Placeholder: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_lama}</code>, <code>{tanggal_baru}</code></p>
         {% if notify[item.id].target %}
-        <button type="submit" class="btn-primary">✅ Konfirmasi dan Kirim Reminder ke {{ item.customer.name }}</button>
+        <button type="submit" class="btn-primary">{{ icon('send') }} Konfirmasi dan Kirim Reminder ke {{ item.customer.name }}</button>
         {% else %}
-        <p style="color: #d9534f;">⚠️ Nomor WhatsApp customer tidak tersedia.</p>
+        <p class="icon-warn">{{ icon('alert-triangle') }} Nomor WhatsApp customer tidak tersedia.</p>
         {% endif %}
       </form>
       {% endif %}
@@ -80,7 +81,8 @@ function closeRescheduleRow(bookingId) {
     detail.style.display = 'none';
   }
   if (button) {
-    button.textContent = '📤 Buka Penjadwalan';
+    const label = button.querySelector('.toggle-label');
+    if (label) label.textContent = 'Buka Penjadwalan';
   }
 }
 
@@ -92,7 +94,8 @@ function openRescheduleRow(bookingId) {
     row.style.display = 'none';
   });
   document.querySelectorAll('.toggle-reschedule-btn').forEach((btn) => {
-    btn.textContent = '📤 Buka Penjadwalan';
+    const label = btn.querySelector('.toggle-label');
+    if (label) label.textContent = 'Buka Penjadwalan';
   });
 
   if (detail) {
@@ -100,7 +103,8 @@ function openRescheduleRow(bookingId) {
     detail.scrollIntoView({ behavior: 'smooth' });
   }
   if (button) {
-    button.textContent = '❌ Tutup Penjadwalan';
+    const label = button.querySelector('.toggle-label');
+    if (label) label.textContent = 'Tutup Penjadwalan';
   }
 }
 
@@ -149,7 +153,7 @@ function updateReminderMessage(bookingId) {
 {% else %}
 <section class="card">
   <div class="alert info">
-    ✓ Tidak ada booking yang perlu reschedule. Semua booking sudah sesuai jadwal.
+    {{ icon('check-circle') }} Tidak ada booking yang perlu reschedule. Semua booking sudah sesuai jadwal.
   </div>
 </section>
 {% endif %}

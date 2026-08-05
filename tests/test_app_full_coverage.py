@@ -262,6 +262,9 @@ class TestBookingsRoute:
 
     def test_update_status_selesai_coating_creates_reminder(self, session_login, app):
         with app.app_context():
+            service = ServiceType.query.filter_by(name="Coating Premium").first()
+            service.after_service = "Maintenance"
+            db.session.commit()
             bid = _mk_booking(service_name="Coating Premium").id
         resp = session_login.post(
             "/bookings",

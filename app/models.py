@@ -39,6 +39,8 @@ class ServiceType(db.Model):
     name = db.Column(db.String(80), unique=True, nullable=False)
     duration_minutes = db.Column(db.Integer, nullable=False)
     active = db.Column(db.Boolean, default=True, nullable=False)
+    # "" or "Maintenance" - creates a MaintenanceReminder after this service.
+    after_service = db.Column(db.String(50), nullable=True, default=None)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 

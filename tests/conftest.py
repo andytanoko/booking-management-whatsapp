@@ -52,18 +52,18 @@ def app():
 def _create_test_service_types():
     """Create default service types for tests."""
     defaults = [
-        ("Interior Detailing", 480),
-        ("Polishing", 480),
-        ("PPF", 7200),
-        ("Coating Premium", 4320),
-        ("Glass Polishing", 120),
-        ("Cuci Mobil", 15),
-        ("Lainnya", 120),
+        ("Interior Detailing", 480, None),
+        ("Polishing", 480, None),
+        ("PPF", 7200, "Maintenance"),
+        ("Coating Premium", 4320, "Maintenance"),
+        ("Glass Polishing", 120, None),
+        ("Cuci Mobil", 15, None),
+        ("Lainnya", 120, None),
     ]
-    for name, duration in defaults:
+    for name, duration, after_service in defaults:
         existing = ServiceType.query.filter_by(name=name).first()
         if not existing:
-            db.session.add(ServiceType(name=name, duration_minutes=duration))
+            db.session.add(ServiceType(name=name, duration_minutes=duration, after_service=after_service))
     db.session.commit()
 
 

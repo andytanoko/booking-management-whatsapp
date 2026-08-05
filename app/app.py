@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
+from flask import Flask, Response, current_app, jsonify, redirect, render_template, request, url_for
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
@@ -51,12 +51,19 @@ BOOKING_STATUSES = {
     "cancel": "Cancel",
 }
 
-# Service names used by the "Booking Maintenance" buttons on the maintenance
-# page (key -> ServiceType.name). Also seeded as ServiceType rows on startup.
-MAINTENANCE_BOOKING_SERVICES = {
-    "body_kaca": "Maintenance (body+kaca)",
-    "body_saja": "Maintenance (body saja)",
-}
+# Service name used by the "Booking Maintenance" button on the maintenance
+# page. Also seeded as a ServiceType row on startup. Formerly split into
+# "Maintenance (body+kaca)" / "Maintenance (body saja)" - merged into one.
+MAINTENANCE_SERVICE_NAME = "Maintenance"
+
+# Legacy per-variant names kept only so bootstrap_defaults() can migrate any
+# existing ServiceType rows/bookings created before the merge.
+_LEGACY_MAINTENANCE_SERVICE_NAMES = ["Maintenance (body+kaca)", "Maintenance (body saja)"]
+
+# Allowed values for ServiceType.after_service, editable in Settings >
+# Manajemen Layanan. A booking whose service has this set to any non-empty
+# value gets a MaintenanceReminder created when it's marked "selesai".
+VALID_AFTER_SERVICE_VALUES = {"", "Maintenance"}
 
 # Which statuses trigger customer notifications
 NOTIFY_ON_STATUS = {"siap_diambil", "selesai"}
@@ -640,21 +647,113 @@ def build_message_view(msg: WhatsAppMessage) -> dict:
     }
 
 
-SEED_USERS_SQL_PATH = os.path.join(os.path.dirname(__file__), "sql", "seed_users.sql")
+_DEFAULT_USERS = [
+    ("admin", "SEED_ADMIN_PASSWORD", "admin123", "admin"),
+    ("cs1", "SEED_CS_PASSWORD", "cs123", "cs"),
+    ("tech1", "SEED_TECH_PASSWORD", "tech123", "technician"),
+]
 
 
 def seed_default_users() -> None:
-    """Create the default first-run accounts (admin/cs1/tech1) from a SQL
-    script instead of hard-coding usernames/passwords in Python. The script
-    only ever contains password *hashes* and is idempotent (ON CONFLICT DO
-    NOTHING), so it is safe to run on every startup."""
-    with open(SEED_USERS_SQL_PATH, "r", encoding="utf-8") as f:
-        sql_script = f.read()
-    db.session.execute(text(sql_script))
+    """Create the default first-run accounts (admin/cs1/tech1) via the ORM if
+    they don't already exist. Safe to run on every startup - existing
+    usernames are left untouched. Passwords can be overridden via env vars
+    (SEED_ADMIN_PASSWORD/SEED_CS_PASSWORD/SEED_TECH_PASSWORD); if unset, the
+    insecure hardcoded defaults are used and a warning is logged so they get
+    changed before going to production."""
+    for username, env_var, default_password, role in _DEFAULT_USERS:
+        if User.query.filter_by(username=username).first():
+            continue
+        raw_password = os.getenv(env_var)
+        if not raw_password:
+            raw_password = default_password
+            current_app.logger.warning(
+                "%s is not set - seeding user '%s' with the insecure default "
+                "password. Set %s and change the password before deploying "
+                "to production.",
+                env_var,
+                username,
+                env_var,
+            )
+        user = User(username=username, role=role, active=True)
+        user.set_password(raw_password)
+        db.session.add(user)
+    db.session.commit()
+
+
+def _ensure_after_service_column() -> None:
+    """db.create_all() only creates missing tables, it doesn't add columns to
+    tables that already exist - add ServiceType.after_service via raw SQL if
+    it's missing. Postgres-only (dev/prod); fresh SQLite test DBs already
+    have the column since they're created from the current models."""
+    if db.engine.dialect.name != "postgresql":
+        return
+    result = db.session.execute(
+        text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'service_type' AND column_name = 'after_service'"
+        )
+    ).fetchone()
+    if not result:
+        db.session.execute(text("ALTER TABLE service_type ADD COLUMN after_service VARCHAR(50)"))
+        db.session.commit()
+
+
+# Default After Service values seeded for the built-in services (only
+# applied when the column is still empty, so manual edits in Settings stick).
+_DEFAULT_AFTER_SERVICE = {
+    "PPF": "Maintenance",
+    "Coating Premium": "Maintenance",
+    MAINTENANCE_SERVICE_NAME: "Maintenance",
+}
+
+
+def _seed_after_service_defaults() -> None:
+    for name, value in _DEFAULT_AFTER_SERVICE.items():
+        service = ServiceType.query.filter_by(name=name).first()
+        if service and not service.after_service:
+            service.after_service = value
+    db.session.commit()
+
+
+def _normalize_after_service_values() -> None:
+    """One-time migration: the old "Maintenance (loop)" value was removed;
+    collapse any existing rows still set to it down to plain "Maintenance"."""
+    ServiceType.query.filter_by(after_service="Maintenance (loop)").update(
+        {"after_service": "Maintenance"}
+    )
+    db.session.commit()
+
+
+def _merge_legacy_maintenance_services() -> None:
+    """One-time migration: merge the old body+kaca/body-saja ServiceType rows
+    into the single MAINTENANCE_SERVICE_NAME service, re-pointing any
+    existing bookings before dropping the legacy rows. Safe to run on every
+    startup - it's a no-op once the legacy rows are gone."""
+    legacy_services = ServiceType.query.filter(
+        ServiceType.name.in_(_LEGACY_MAINTENANCE_SERVICE_NAMES)
+    ).all()
+    if not legacy_services:
+        return
+
+    canonical = ServiceType.query.filter_by(name=MAINTENANCE_SERVICE_NAME).first()
+    if not canonical:
+        canonical = ServiceType(name=MAINTENANCE_SERVICE_NAME, duration_minutes=90)
+        db.session.add(canonical)
+        db.session.flush()
+
+    for legacy in legacy_services:
+        Booking.query.filter_by(service_type_id=legacy.id).update(
+            {"service_type_id": canonical.id}
+        )
+        db.session.delete(legacy)
+
+    db.session.commit()
 
 
 def bootstrap_defaults() -> None:
     seed_default_users()
+    _ensure_after_service_column()
 
     defaults = [
         ("Interior Detailing", 480),  # 8 jam
@@ -664,8 +763,7 @@ def bootstrap_defaults() -> None:
         ("Glass Polishing", 120),  # 2 jam
         ("Cuci Mobil", 15),  # 15 menit
         ("Lainnya", 120),  # 2 jam - default untuk package yang tidak match
-        (MAINTENANCE_BOOKING_SERVICES["body_kaca"], 120),  # 2 jam
-        (MAINTENANCE_BOOKING_SERVICES["body_saja"], 60),  # 1 jam
+        (MAINTENANCE_SERVICE_NAME, 90),  # 1.5 jam
     ]
     for name, duration in defaults:
         existing = ServiceType.query.filter_by(name=name).first()
@@ -674,10 +772,22 @@ def bootstrap_defaults() -> None:
 
     db.session.commit()
 
+    _merge_legacy_maintenance_services()
+    _normalize_after_service_values()
+    _seed_after_service_defaults()
+
 
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
+    # Config.SQLALCHEMY_DATABASE_URI is frozen at first import of app.config (os.getenv
+    # read once at class-definition time). Re-read the env var here so tests that set
+    # os.environ["DATABASE_URL"] before calling create_app() actually take effect instead
+    # of silently binding to whatever DATABASE_URL the process started with (e.g. the
+    # real production database) - see repo memory for the incident this caused.
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
+        "DATABASE_URL", app.config["SQLALCHEMY_DATABASE_URI"]
+    )
     db.init_app(app)
 
     with app.app_context():
@@ -734,7 +844,7 @@ def create_app() -> Flask:
     @app.route("/bookings", methods=["GET", "POST"])
     @require_roles("admin", "cs")
     def bookings():
-        message = None
+        message = request.args.get("sync_ok")
         error = None
 
         def render_bookings():
@@ -784,9 +894,10 @@ def create_app() -> Flask:
                     message = f"Status booking #{booking.id} diperbarui menjadi '{BOOKING_STATUSES[new_status]}'"
                     if new_status == "selesai":
                         message += " — cek & kirim notifikasi ke customer di bawah."
-                        # Create maintenance reminder if service is Coating Premium or PPF
+                        # Create a maintenance reminder if this service's "After Service"
+                        # (configurable in Settings > Manajemen Layanan) is set.
                         service_name = booking.service_type.name
-                        if service_name in ["Coating Premium", "PPF"]:
+                        if booking.service_type.after_service:
                             existing_reminder = MaintenanceReminder.query.filter_by(booking_id=booking.id).first()
                             if not existing_reminder:
                                 maintenance_due = datetime.utcnow() + timedelta(days=180)  # 6 months
@@ -1439,10 +1550,39 @@ def create_app() -> Flask:
     def history():
         data = Booking.query.filter(Booking.status.in_(["cancel", "selesai"]))
         data = data.order_by(Booking.scheduled_start.asc()).all()
+
+        # A car whose service has "After Service" = Maintenance can come back for
+        # maintenance many times - surface last maintenance date/service + total
+        # count on that original row.
+        maintenance_names = {MAINTENANCE_SERVICE_NAME}
+        maintenance_bookings = (
+            Booking.query.join(ServiceType)
+            .filter(ServiceType.name.in_(maintenance_names), Booking.status == "selesai")
+            .order_by(Booking.scheduled_start.desc())
+            .all()
+        )
+        maintenance_by_key: dict[tuple, list[Booking]] = {}
+        for mb in maintenance_bookings:
+            key = (mb.customer_id, mb.license_plate)
+            maintenance_by_key.setdefault(key, []).append(mb)
+
+        maintenance_stats = {}
+        for item in data:
+            if item.service_type.after_service:
+                matches = maintenance_by_key.get((item.customer_id, item.license_plate), [])
+                if matches:
+                    latest = matches[0]  # already ordered desc by scheduled_start
+                    maintenance_stats[item.id] = {
+                        "count": len(matches),
+                        "last_date": latest.scheduled_start,
+                        "last_service": latest.service_type.name,
+                    }
+
         return render_template(
             "history.html",
             bookings=data,
             statuses=BOOKING_STATUSES,
+            maintenance_stats=maintenance_stats,
             partial=wants_partial(),
         )
 
@@ -1676,13 +1816,10 @@ def create_app() -> Flask:
 
             elif action == "book_maintenance":
                 reminder_id = int(request.form.get("reminder_id", "0") or 0)
-                service_key = request.form.get("service_key", "").strip()
-                service_name = MAINTENANCE_BOOKING_SERVICES.get(service_key)
+                service_name = MAINTENANCE_SERVICE_NAME
                 reminder = MaintenanceReminder.query.get(reminder_id)
                 if not reminder:
                     error = "Maintenance reminder tidak ditemukan"
-                elif not service_name:
-                    error = "Layanan maintenance tidak valid"
                 else:
                     service = ServiceType.query.filter_by(name=service_name).first()
                     if not service:
@@ -1719,6 +1856,7 @@ def create_app() -> Flask:
                                 details=f"reminder_id={reminder.id} customer={customer.phone} service={service.name}",
                             )
                         )
+                        db.session.delete(reminder)
                         db.session.commit()
                         message = (
                             f"Booking '{service.name}' berhasil dibuat untuk {customer.name}. "
@@ -1780,6 +1918,7 @@ def create_app() -> Flask:
                 name = request.form.get("service_name", "").strip()
                 duration_value = request.form.get("service_duration", "").strip()
                 duration_unit = request.form.get("service_unit", "menit").strip()
+                after_service = request.form.get("service_after_service", "").strip()
                 try:
                     duration_num = float(duration_value)
                     # Convert to minutes
@@ -1789,18 +1928,25 @@ def create_app() -> Flask:
                     
                     if not name or len(name) < 3:
                         error = "Nama layanan harus minimal 3 karakter"
+                    elif after_service not in VALID_AFTER_SERVICE_VALUES:
+                        error = "After Service tidak valid"
                     else:
                         existing = ServiceType.query.filter_by(name=name).first()
                         if existing:
                             error = "Layanan dengan nama ini sudah ada"
                         else:
-                            service = ServiceType(name=name, duration_minutes=duration_minutes, active=True)
+                            service = ServiceType(
+                                name=name,
+                                duration_minutes=duration_minutes,
+                                active=True,
+                                after_service=after_service or None,
+                            )
                             db.session.add(service)
                             db.session.add(
                                 AuditLog(
                                     actor_user_id=current_user_id(),
                                     action="service.create",
-                                    details=f"name={name} duration={duration_num}{duration_unit}",
+                                    details=f"name={name} duration={duration_num}{duration_unit} after_service={after_service or '-'}",
                                 )
                             )
                             db.session.commit()
@@ -1812,6 +1958,7 @@ def create_app() -> Flask:
                 name = request.form.get("service_name", "").strip()
                 duration_value = request.form.get("service_duration", "").strip()
                 duration_unit = request.form.get("service_unit", "menit").strip()
+                after_service = request.form.get("service_after_service", "").strip()
                 service = ServiceType.query.get(service_id)
                 if not service:
                     error = "Layanan tidak ditemukan"
@@ -1825,6 +1972,8 @@ def create_app() -> Flask:
                         
                         if not name or len(name) < 3:
                             error = "Nama layanan harus minimal 3 karakter"
+                        elif after_service not in VALID_AFTER_SERVICE_VALUES:
+                            error = "After Service tidak valid"
                         else:
                             # Check for name conflict with other services
                             conflict = ServiceType.query.filter(
@@ -1835,11 +1984,12 @@ def create_app() -> Flask:
                             else:
                                 service.name = name
                                 service.duration_minutes = duration_minutes
+                                service.after_service = after_service or None
                                 db.session.add(
                                     AuditLog(
                                         actor_user_id=current_user_id(),
                                         action="service.update",
-                                        details=f"service_id={service_id} name={name} duration={duration_num}{duration_unit}",
+                                        details=f"service_id={service_id} name={name} duration={duration_num}{duration_unit} after_service={after_service or '-'}",
                                     )
                                 )
                                 db.session.commit()
@@ -2122,4 +2272,7 @@ app = create_app()
 
 if __name__ == "__main__":  # pragma: no cover
     port = int(os.getenv("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=True, threaded=True)
+    # debug=True exposes the Werkzeug interactive debugger (remote code execution
+    # risk) - default it off since host="0.0.0.0" makes this reachable on the network.
+    debug = os.getenv("FLASK_DEBUG", "false").strip().lower() in ("1", "true", "yes")
+    app.run(host="0.0.0.0", port=port, debug=debug, threaded=True)

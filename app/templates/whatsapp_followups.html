@@ -1,7 +1,8 @@
 {% extends 'partial.html' if partial else 'base.html' %}
+{% from '_icons.html' import icon %}
 {% block content %}
 <section class="card">
-  <h2>Follow-up Booking WhatsApp</h2>
+  <div class="card-header">{{ icon('alert-triangle') }}<h2>Follow-up Booking WhatsApp</h2></div>
   <p>Booking yang dikirim lewat WhatsApp tapi gagal validasi (kendaraan kosong, nomor tidak aktif, atau slot penuh). Tidak ada booking yang dibuat otomatis - hubungi pelanggan atau buat booking manual.</p>
 </section>
 
@@ -15,7 +16,7 @@
           <th>Nomor WhatsApp</th>
           <th>Nama Pelanggan</th>
           <th>Alasan Gagal</th>
-          <th></th>
+          <th>Aksi</th>
         </tr>
       </thead>
       <tbody>
@@ -27,7 +28,7 @@
           <td>{{ item.reason }}</td>
           <td>
             {% if item.phone %}
-            <a href="{{ url_for('bookings', phone=item.phone, customer_name=item.customer_name) }}">Buat Booking</a>
+            <a href="{{ url_for('bookings', phone=item.phone, customer_name=item.customer_name) }}" class="btn-small btn-secondary">{{ icon('plus-circle') }} Buat Booking</a>
             {% endif %}
           </td>
         </tr>

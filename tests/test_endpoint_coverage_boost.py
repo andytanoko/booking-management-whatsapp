@@ -124,6 +124,8 @@ class TestBookingsUpdateStatus:
         with app.app_context():
             customer = Customer(name="C3", phone="628111000333")
             service = ServiceType.query.filter_by(name="Coating Premium").first()
+            service.after_service = "Maintenance"
+            db.session.commit()
             booking = Booking(
                 customer=customer, service_type=service,
                 scheduled_start=datetime.now(), scheduled_end=datetime.now() + timedelta(hours=2),

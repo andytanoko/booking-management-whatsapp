@@ -1,7 +1,8 @@
 {% extends 'partial.html' if partial else 'base.html' %}
+{% from '_icons.html' import icon %}
 {% block content %}
 <section class="card">
-  <h2>Buat Booking</h2>
+  <div class="card-header">{{ icon('plus-circle') }}<h2>Buat Booking</h2></div>
   {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
   <form method="post" class="form-grid two-col">
@@ -35,12 +36,14 @@
     <label>Catatan
       <input type="text" name="notes" value="{{ request.form.get('notes', '') if error else '' }}" />
     </label>
-    <button type="submit">Simpan Booking</button>
+    <div class="form-actions">
+      <button type="submit">{{ icon('save') }} Simpan Booking</button>
+    </div>
   </form>
 </section>
 
 <section class="card">
-  <h2>Daftar Booking</h2>
+  <div class="card-header">{{ icon('list') }}<h2>Daftar Booking</h2></div>
   <div class="table-wrap">
     <table>
       <thead>
@@ -76,11 +79,13 @@
           </td>
           <td>{{ item.source }}</td>
           <td>
-            {% if item.status in ['kendaraan_masuk', 'dikerjakan', 'qc', 'siap_diambil', 'selesai'] %}
-            <span class="btn-link disabled" style="opacity:0.5; cursor:not-allowed;">✏️ Edit</span>
-            {% else %}
-            <a href="{{ url_for('edit_booking', booking_id=item.id) }}" class="btn-link">✏️ Edit</a>
-            {% endif %}
+            <div class="row-actions">
+              {% if item.status in ['kendaraan_masuk', 'dikerjakan', 'qc', 'siap_diambil', 'selesai'] %}
+              <button type="button" class="btn-small btn-secondary" disabled aria-label="Edit booking (terkunci)">{{ icon('edit') }} Edit</button>
+              {% else %}
+              <button type="button" class="btn-small btn-secondary" onclick="window.location.href='{{ url_for('edit_booking', booking_id=item.id) }}'">{{ icon('edit') }} Edit</button>
+              {% endif %}
+            </div>
             <form method="post" class="status-form" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-top:0.75rem;">
               <input type="hidden" name="action" value="update_status" />
               <input type="hidden" name="booking_id" value="{{ item.id }}" />
@@ -91,13 +96,13 @@
                   {% endif %}
                 {% endfor %}
               </select>
-              <button type="submit" class="btn-secondary" {% if item.status == 'reschedule' %}disabled{% endif %}>Update</button>
+              <button type="submit" class="btn-small btn-secondary" {% if item.status == 'reschedule' %}disabled{% endif %}>{{ icon('check-circle') }} Update</button>
               {% if item.status != 'reschedule' %}
               </form>
-              <form method="post" style="display:inline; margin-left:0.5rem;">
+              <form method="post" class="inline-form" style="margin-left:0.5rem;">
                 <input type="hidden" name="action" value="request_reschedule" />
                 <input type="hidden" name="booking_id" value="{{ item.id }}" />
-                <button type="submit" class="btn-secondary">🔁 Reschedule</button>
+                <button type="submit" class="btn-small btn-secondary">{{ icon('repeat') }} Reschedule</button>
               </form>
               {% else %}
               <span class="status-badge status-reschedule">Menunggu Reschedule</span>
@@ -108,13 +113,13 @@
         <tr class="notify-row">
           <td colspan="8">
             <details class="notify-box" open>
-              <summary>📣 Kabari customer (booking selesai)</summary>
+              <summary>{{ icon('megaphone') }} Kabari customer (booking selesai)</summary>
               <form method="post" class="notify-form">
                 <input type="hidden" name="action" value="notify_customer" />
                 <input type="hidden" name="booking_id" value="{{ item.id }}" />
                 <textarea name="message" rows="4">{{ notify[item.id].message }}</textarea>
                 {% if notify[item.id].target %}
-                <button type="submit" class="btn-secondary">Kirim ke {{ item.customer.name }}</button>
+                <button type="submit" class="btn-small btn-secondary">{{ icon('send') }} Kirim ke {{ item.customer.name }}</button>
                 {% else %}
                 <p class="hint">Nomor WhatsApp customer tidak tersedia.</p>
                 {% endif %}
@@ -130,3 +135,4 @@
 </section>
 
 {% endblock %}
+

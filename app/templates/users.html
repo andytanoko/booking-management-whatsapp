@@ -1,7 +1,8 @@
 {% extends 'partial.html' if partial else 'base.html' %}
+{% from '_icons.html' import icon %}
 {% block content %}
 <section class="card">
-  <h2>Manajemen User</h2>
+  <div class="card-header">{{ icon('key') }}<h2>Manajemen User</h2></div>
   {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
   <form method="post" class="form-grid three-col">
     <label>Username
@@ -17,12 +18,14 @@
         <option value="technician">Technician</option>
       </select>
     </label>
-    <button type="submit">Tambah User</button>
+    <div class="form-actions">
+      <button type="submit">{{ icon('plus-circle') }} Tambah User</button>
+    </div>
   </form>
 </section>
 
 <section class="card">
-  <h2>Daftar User</h2>
+  <div class="card-header">{{ icon('list') }}<h2>Daftar User</h2></div>
   <div class="table-wrap">
     <table>
       <thead>
@@ -38,7 +41,11 @@
         <tr>
           <td>{{ user.username }}</td>
           <td>{{ user.role }}</td>
-          <td>{{ 'aktif' if user.active else 'nonaktif' }}</td>
+          <td>
+            <span class="status-badge {{ 'status-dikonfirmasi' if user.active else 'status-batal' }}">
+              {{ 'Aktif' if user.active else 'Nonaktif' }}
+            </span>
+          </td>
           <td>{{ user.created_at.strftime('%d-%m-%Y %H:%M') }}</td>
         </tr>
         {% endfor %}

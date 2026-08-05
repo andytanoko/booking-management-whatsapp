@@ -14,6 +14,15 @@
   box-sizing: border-box;
 }
 
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--brand-2);
+  outline-offset: 2px;
+}
+
 body {
   margin: 0;
   font-family: "Avenir Next", "Trebuchet MS", sans-serif;
@@ -105,17 +114,41 @@ body {
 }
 
 .nav-icon {
-  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.nav-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.sidebar-toggle svg {
+  width: 20px;
+  height: 20px;
 }
 
 .sidebar-logout {
   margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   text-align: center;
   text-decoration: none;
   padding: 10px;
   border-radius: 10px;
   border: 1px solid var(--line);
   color: var(--muted);
+}
+
+.sidebar-logout svg {
+  width: 16px;
+  height: 16px;
 }
 
 .sidebar-logout:hover {
@@ -199,11 +232,37 @@ button {
 }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   background: linear-gradient(90deg, var(--brand), #e07a5f);
   color: #fff;
   border: none;
   font-weight: 600;
   cursor: pointer;
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+
+button:hover {
+  filter: brightness(1.05);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+}
+
+button svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
 .full-col {
@@ -215,6 +274,7 @@ button {
   display: flex;
   gap: 10px;
   align-items: end;
+  flex-wrap: wrap;
 }
 
 .form-actions button {
@@ -226,16 +286,113 @@ button.btn-secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   width: auto;
   background: #f0f0f3;
   color: #333;
   text-decoration: none;
 }
 
+.btn-secondary svg,
+.btn-primary svg,
+.btn-danger svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+button.btn-primary {
+  width: auto;
+}
+
 button.btn-danger {
   width: auto;
   background: #f4c7c3;
   color: #8a1c13;
+}
+
+.btn-small {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  border-radius: 8px;
+}
+
+.btn-small svg {
+  width: 14px;
+  height: 14px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.card-header svg {
+  width: 22px;
+  height: 22px;
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.card-header h2 {
+  margin: 0;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.icon-ok,
+.icon-no,
+.icon-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.icon-ok {
+  color: var(--ok);
+}
+
+.icon-no {
+  color: var(--muted);
+}
+
+.icon-warn {
+  color: var(--err);
+  font-weight: 600;
+}
+
+.icon-ok svg,
+.icon-no svg,
+.icon-warn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.stat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.stat-header svg {
+  width: 18px;
+  height: 18px;
+  color: var(--brand);
+}
+
+.stat-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
 }
 
 .booking-date-dialog {
@@ -342,6 +499,14 @@ td {
   padding: 10px 12px;
   border-radius: 10px;
   margin: 10px 0;
+}
+
+.alert svg {
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+  margin-right: 2px;
+  flex-shrink: 0;
 }
 
 .success {
@@ -586,8 +751,15 @@ td {
 }
 
 .wa-chat-empty-icon {
-  font-size: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: 8px;
+}
+
+.wa-chat-empty-icon svg {
+  width: 56px;
+  height: 56px;
 }
 
 .wa-thread {
@@ -702,6 +874,11 @@ td {
   justify-content: center;
 }
 
+.wa-send svg {
+  width: 20px;
+  height: 20px;
+}
+
 .wa-send:disabled {
   opacity: 0.6;
   cursor: default;
@@ -781,6 +958,13 @@ td {
   color: #166534;
 }
 
+.notify-box summary svg {
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+  margin-right: 4px;
+}
+
 .notify-form {
   display: grid;
   gap: 8px;
@@ -799,6 +983,35 @@ td {
 .notify-form .btn-secondary {
   width: auto;
   justify-self: start;
+}
+
+.maintenance-booking-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.maintenance-booking-btn {
+  width: auto;
+  justify-self: start;
+  background: #25d366;
+  color: #fff;
+  border: none;
+  gap: 8px;
+}
+
+.maintenance-booking-btn:hover {
+  background: #1ea954;
+}
+
+.maintenance-btn-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.maintenance-btn-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 @media (max-width: 760px) {

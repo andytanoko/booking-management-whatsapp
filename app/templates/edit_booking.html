@@ -1,7 +1,8 @@
 {% extends 'partial.html' if partial else 'base.html' %}
+{% from '_icons.html' import icon %}
 {% block content %}
 <section class="card">
-  <h2>Edit Booking #{{ booking.id }}</h2>
+  <div class="card-header">{{ icon('edit') }}<h2>Edit Booking #{{ booking.id }}</h2></div>
   {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
   
@@ -49,15 +50,15 @@
       <input type="text" name="notes" value="{{ booking.notes or '' }}" />
     </label>
     
-    <div style="grid-column: span 2; display: flex; gap: 10px;">
-      <button type="submit" class="btn-primary">💾 Simpan Perubahan</button>
-      <a href="{{ url_for('bookings') }}" class="btn-secondary" style="text-decoration: none; display: inline-block; padding: 8px 16px; background: #999; color: white; border: none; border-radius: 4px; cursor: pointer;">❌ Batal</a>
+    <div class="form-actions full-col">
+      <button type="submit" class="btn-primary">{{ icon('save') }} Simpan Perubahan</button>
+      <a href="{{ url_for('bookings') }}" class="btn-secondary">{{ icon('x-circle') }} Batal</a>
     </div>
   </form>
 </section>
 
 <section class="card">
-  <h2>Informasi Booking</h2>
+  <div class="card-header">{{ icon('info') }}<h2>Informasi Booking</h2></div>
   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
     <div>
       <p><strong>ID:</strong> {{ booking.id }}</p>
