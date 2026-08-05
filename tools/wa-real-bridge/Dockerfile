@@ -43,8 +43,11 @@ COPY --chown=pptruser:pptruser package*.json ./
 RUN npm ci --omit=dev
 
 COPY --chown=pptruser:pptruser bridge.js ./
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-USER pptruser
-
+# Stays root at container start so the entrypoint can fix bind-mount
+# ownership; it drops to pptruser via setpriv before exec'ing node.
 EXPOSE 3000
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "bridge.js"]
