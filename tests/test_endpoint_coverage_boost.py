@@ -52,6 +52,52 @@ class TestBookingsUpdateStatus:
         })
         assert resp.status_code == 200
 
+    def test_request_reschedule_without_date(self, session_login, app):
+        with app.app_context():
+            customer = Customer(name="C5", phone="628111000555")
+            service = ServiceType.query.filter_by(name="Cuci Mobil").first()
+            booking = Booking(
+                customer=customer, service_type=service,
+                scheduled_start=datetime.now(), scheduled_end=datetime.now() + timedelta(hours=1),
+                status="dikonfirmasi",
+            )
+            db.session.add_all([customer, booking])
+            db.session.commit()
+            bid = booking.id
+
+        resp = session_login.post("/bookings", data={
+            "action": "request_reschedule",
+            "booking_id": str(bid),
+            "new_scheduled_start": "",
+        })
+        assert resp.status_code == 200
+        with app.app_context():
+            assert Booking.query.get(bid).status == "reschedule"
+
+    def test_request_reschedule_with_date(self, session_login, app):
+        with app.app_context():
+            customer = Customer(name="C6", phone="628111000666")
+            service = ServiceType.query.filter_by(name="Cuci Mobil").first()
+            booking = Booking(
+                customer=customer, service_type=service,
+                scheduled_start=datetime.now(), scheduled_end=datetime.now() + timedelta(hours=1),
+                status="dikonfirmasi",
+            )
+            db.session.add_all([customer, booking])
+            db.session.commit()
+            bid = booking.id
+
+        resp = session_login.post("/bookings", data={
+            "action": "request_reschedule",
+            "booking_id": str(bid),
+            "new_scheduled_start": "2026-12-31",
+        })
+        assert resp.status_code == 200
+        with app.app_context():
+            booking = Booking.query.get(bid)
+            assert booking.status == "reschedule"
+            assert "Permintaan reschedule" in (booking.notes or "")
+
     def test_update_status_valid(self, session_login, app):
         with app.app_context():
             customer = Customer(name="C2", phone="628111000222")
@@ -78,6 +124,8 @@ class TestBookingsUpdateStatus:
         with app.app_context():
             customer = Customer(name="C3", phone="628111000333")
             service = ServiceType.query.filter_by(name="Coating Premium").first()
+            service.after_service = "Maintenance"
+            db.session.commit()
             booking = Booking(
                 customer=customer, service_type=service,
                 scheduled_start=datetime.now(), scheduled_end=datetime.now() + timedelta(hours=2),

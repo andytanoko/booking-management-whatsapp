@@ -1,7 +1,8 @@
-{% extends 'base.html' %}
+{% extends 'partial.html' if partial else 'base.html' %}
+{% from '_icons.html' import icon %}
 {% block content %}
 <section class="card">
-  <h2>Maintenance Reminders - Coating Premium & PPF</h2>
+  <div class="card-header">{{ icon('wrench') }}<h2>Maintenance Reminders - Coating Premium & PPF</h2></div>
   {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
   
@@ -30,34 +31,60 @@
             <td>
               {{ reminder.maintenance_due_at.strftime('%d-%m-%Y') }}
               {% if reminder.maintenance_due_at <= now %}
-                <br /><span style="color: red; font-size: 0.85em;">⚠️ Sudah jatuh tempo</span>
+                <br /><span class="icon-warn">{{ icon('alert-triangle') }} Sudah jatuh tempo</span>
               {% endif %}
             </td>
             <td>
               {% if reminder.reminder_sent_at %}
-                ✅ {{ reminder.reminder_sent_at.strftime('%d-%m-%Y %H:%M') }}
+                <span class="icon-ok">{{ icon('check-circle') }} {{ reminder.reminder_sent_at.strftime('%d-%m-%Y %H:%M') }}</span>
               {% else %}
-                ❌ Belum
+                <span class="icon-no">{{ icon('x-circle') }} Belum</span>
               {% endif %}
             </td>
             <td>
               {% if reminder.review_requested_at %}
-                ✅ {{ reminder.review_requested_at.strftime('%d-%m-%Y %H:%M') }}
+                <span class="icon-ok">{{ icon('check-circle') }} {{ reminder.review_requested_at.strftime('%d-%m-%Y %H:%M') }}</span>
               {% else %}
-                ❌ Belum
+                <span class="icon-no">{{ icon('x-circle') }} Belum</span>
               {% endif %}
             </td>
             <td>
-              <form method="post" style="display: inline;">
-                <input type="hidden" name="action" value="send_reminder" />
-                <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
-                <button type="submit" class="btn-secondary" title="Kirim reminder maintenance">💬 Reminder</button>
-              </form>
-              <form method="post" style="display: inline;">
-                <input type="hidden" name="action" value="send_review" />
-                <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
-                <button type="submit" class="btn-secondary" title="Minta review Google Maps">⭐ Review</button>
-              </form>
+              <details class="notify-box">
+                <summary title="Kirim reminder maintenance">{{ icon('send') }} Reminder</summary>
+                <form method="post" class="notify-form">
+                  <input type="hidden" name="action" value="send_reminder" />
+                  <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
+                  <textarea name="message" rows="4">{{ drafts[reminder.id].reminder_message }}</textarea>
+                  <button type="submit" class="btn-small btn-secondary">{{ icon('send') }} Kirim ke {{ reminder.customer.name }}</button>
+                </form>
+              </details>
+              <details class="notify-box">
+                <summary title="Minta review Google Maps">{{ icon('star') }} Review</summary>
+                <form method="post" class="notify-form">
+                  <input type="hidden" name="action" value="send_review" />
+                  <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
+                  <textarea name="message" rows="4">{{ drafts[reminder.id].review_message }}</textarea>
+                  <button type="submit" class="btn-small btn-secondary">{{ icon('send') }} Kirim ke {{ reminder.customer.name }}</button>
+                </form>
+              </details>
+              <div class="maintenance-booking-actions">
+                <button type="button" class="btn-secondary maintenance-booking-btn" onclick="document.getElementById('dlg-maintenance-{{ reminder.id }}').showModal()"><span class="maintenance-btn-icon">{{ icon('wrench') }}</span><span>Booking Maintenance</span></button>
+              </div>
+
+              <dialog id="dlg-maintenance-{{ reminder.id }}" class="booking-date-dialog">
+                <form method="post">
+                  <input type="hidden" name="action" value="book_maintenance" />
+                  <input type="hidden" name="reminder_id" value="{{ reminder.id }}" />
+                  <p>Tanggal booking Maintenance untuk <strong>{{ reminder.customer.name }}</strong></p>
+                  <label>Tanggal Booking
+                    <input type="date" name="scheduled_start" required />
+                  </label>
+                  <div class="dialog-actions">
+                    <button type="submit" class="btn-small btn-secondary">{{ icon('save') }} Simpan Booking</button>
+                    <button type="button" class="btn-small btn-secondary" onclick="this.closest('dialog').close()">{{ icon('x-circle') }} Batal</button>
+                  </div>
+                </form>
+              </dialog>
             </td>
           </tr>
           {% endfor %}

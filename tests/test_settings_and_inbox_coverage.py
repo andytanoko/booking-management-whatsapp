@@ -152,7 +152,6 @@ class TestSettingsSave:
     def test_save_settings(self, session_login, app):
         resp = session_login.post("/settings", data={
             "action": "save",
-            "wa_mode": "bridge",
             "booking_done_template": "Custom done {nama}",
             "reschedule_template": "Custom reschedule {nama}",
         })
@@ -162,7 +161,6 @@ class TestSettingsSave:
     def test_save_invalid_wa_mode_defaults(self, session_login, app):
         resp = session_login.post("/settings", data={
             "action": "save",
-            "wa_mode": "invalid_mode",
         })
         assert resp.status_code == 200
 

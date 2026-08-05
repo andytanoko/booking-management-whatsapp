@@ -14,6 +14,15 @@
   box-sizing: border-box;
 }
 
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--brand-2);
+  outline-offset: 2px;
+}
+
 body {
   margin: 0;
   font-family: "Avenir Next", "Trebuchet MS", sans-serif;
@@ -24,52 +33,133 @@ body {
   min-height: 100vh;
 }
 
-.bg-shape {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-image: linear-gradient(rgba(217, 93, 57, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(39, 125, 161, 0.05) 1px, transparent 1px);
-  background-size: 32px 32px;
+.app-shell {
+  display: flex;
+  min-height: 100vh;
 }
 
-.topbar {
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 30;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.sidebar {
   position: sticky;
   top: 0;
-  z-index: 10;
+  height: 100vh;
+  width: 240px;
+  flex: 0 0 240px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 24px;
+  flex-direction: column;
+  padding: 20px 16px;
+  background: rgba(255, 255, 255, 0.86);
+  border-right: 1px solid var(--line);
   backdrop-filter: blur(8px);
-  background: rgba(248, 245, 239, 0.72);
+  z-index: 20;
+}
+
+.sidebar-brand {
+  padding: 0 8px 18px;
   border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
 }
 
-.topbar h1 {
+.sidebar-brand h1 {
   margin: 0;
-  font-size: 1.3rem;
+  font-size: 1.2rem;
 }
 
-.topbar p {
+.sidebar-brand p {
   margin: 2px 0 0;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
 }
 
-nav {
+.sidebar-nav {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  overflow-y: auto;
 }
 
-nav a {
+.sidebar-nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   text-decoration: none;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
+  padding: 10px 12px;
+  border-radius: 10px;
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.75);
+  font-size: 0.92rem;
+}
+
+.sidebar-nav a:hover {
+  background: rgba(217, 93, 57, 0.08);
+}
+
+.sidebar-nav a.active {
+  background: var(--brand);
+  color: #fff;
+}
+
+.nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.nav-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.sidebar-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+.sidebar-logout {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  text-decoration: none;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.sidebar-logout svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sidebar-logout:hover {
+  color: var(--err);
+  border-color: var(--err);
+}
+
+.main-content {
+  flex: 1;
+  min-width: 0;
+  padding: 24px 28px 40px;
 }
 
 .container {
@@ -79,6 +169,11 @@ nav a {
   display: grid;
   gap: 16px;
   animation: fadeIn 0.35s ease-out;
+}
+
+.container-plain {
+  min-height: 100vh;
+  align-content: center;
 }
 
 .cards-row {
@@ -137,11 +232,37 @@ button {
 }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   background: linear-gradient(90deg, var(--brand), #e07a5f);
   color: #fff;
   border: none;
   font-weight: 600;
   cursor: pointer;
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+
+button:hover {
+  filter: brightness(1.05);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+}
+
+button svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
 .full-col {
@@ -153,6 +274,7 @@ button {
   display: flex;
   gap: 10px;
   align-items: end;
+  flex-wrap: wrap;
 }
 
 .form-actions button {
@@ -164,16 +286,136 @@ button.btn-secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   width: auto;
   background: #f0f0f3;
   color: #333;
   text-decoration: none;
 }
 
+.btn-secondary svg,
+.btn-primary svg,
+.btn-danger svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+button.btn-primary {
+  width: auto;
+}
+
 button.btn-danger {
   width: auto;
   background: #f4c7c3;
   color: #8a1c13;
+}
+
+.btn-small {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  border-radius: 8px;
+}
+
+.btn-small svg {
+  width: 14px;
+  height: 14px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.card-header svg {
+  width: 22px;
+  height: 22px;
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.card-header h2 {
+  margin: 0;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.icon-ok,
+.icon-no,
+.icon-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.icon-ok {
+  color: var(--ok);
+}
+
+.icon-no {
+  color: var(--muted);
+}
+
+.icon-warn {
+  color: var(--err);
+  font-weight: 600;
+}
+
+.icon-ok svg,
+.icon-no svg,
+.icon-warn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.stat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.stat-header svg {
+  width: 18px;
+  height: 18px;
+  color: var(--brand);
+}
+
+.stat-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.booking-date-dialog {
+  border: none;
+  border-radius: 8px;
+  padding: 20px;
+  min-width: 280px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.booking-date-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.booking-date-dialog label {
+  display: block;
+  margin-top: 10px;
+}
+
+.booking-date-dialog .dialog-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 .search-bar {
@@ -259,6 +501,14 @@ td {
   margin: 10px 0;
 }
 
+.alert svg {
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
 .success {
   background: #e9f7ee;
   color: var(--ok);
@@ -286,6 +536,15 @@ td {
   object-fit: contain;
 }
 
+.qr-img-sm {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -304,17 +563,36 @@ td {
     grid-template-columns: 1fr;
   }
 
-  .topbar {
-    gap: 12px;
-    flex-direction: column;
-    align-items: flex-start;
+  .sidebar-toggle {
+    display: block;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease-out;
+    box-shadow: 0 0 24px rgba(0, 0, 0, 0.15);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-brand {
+    padding-left: 44px;
+  }
+
+  .main-content {
+    padding: 64px 16px 32px;
   }
 }
 
 /* ===== WhatsApp-style inbox ===== */
 .wa {
   display: flex;
-  height: calc(100vh - 150px);
+  height: calc(100vh - 100px);
   min-height: 480px;
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -473,8 +751,15 @@ td {
 }
 
 .wa-chat-empty-icon {
-  font-size: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: 8px;
+}
+
+.wa-chat-empty-icon svg {
+  width: 56px;
+  height: 56px;
 }
 
 .wa-thread {
@@ -589,6 +874,11 @@ td {
   justify-content: center;
 }
 
+.wa-send svg {
+  width: 20px;
+  height: 20px;
+}
+
 .wa-send:disabled {
   opacity: 0.6;
   cursor: default;
@@ -658,10 +948,21 @@ td {
   padding: 8px 12px;
 }
 
+.notify-box + .notify-box {
+  margin-top: 8px;
+}
+
 .notify-box summary {
   cursor: pointer;
   font-weight: 600;
   color: #166534;
+}
+
+.notify-box summary svg {
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+  margin-right: 4px;
 }
 
 .notify-form {
@@ -682,6 +983,35 @@ td {
 .notify-form .btn-secondary {
   width: auto;
   justify-self: start;
+}
+
+.maintenance-booking-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.maintenance-booking-btn {
+  width: auto;
+  justify-self: start;
+  background: #25d366;
+  color: #fff;
+  border: none;
+  gap: 8px;
+}
+
+.maintenance-booking-btn:hover {
+  background: #1ea954;
+}
+
+.maintenance-btn-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.maintenance-btn-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
 @media (max-width: 760px) {

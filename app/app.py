@@ -8,7 +8,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
+from flask import Flask, Response, current_app, jsonify, redirect, render_template, request, url_for
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import current_user_id, current_user_role, login_user, logout_user, require_auth, require_roles
@@ -18,9 +19,25 @@ from app.services.booking_engine import compute_booking_end, has_conflict, is_wi
 from app.services.reminders import run_due_reminders
 from app.services.settings_store import get_many, get_setting, set_setting
 from app.services.semantic_matcher import match_package_to_service, get_variant_info
-from app.services.whatsapp import discover_bridge_profile, fetch_whatsapp_contacts, log_inbound_message, send_and_log_message
+from app.services.whatsapp import (
+    check_whatsapp_number_registered,
+    create_wa_instance,
+    delete_wa_instance,
+    discover_bridge_profile,
+    fetch_whatsapp_contacts,
+    list_wa_instances,
+    log_inbound_message,
+    send_and_log_message,
+    wa_instance_qr_embed_url,
+)
 
 scheduler = BackgroundScheduler()
+
+
+def wants_partial() -> bool:
+    """True when the request comes from the SPA router (app.js), which only
+    needs the inner content block, not the full page shell."""
+    return request.headers.get("X-Requested-With") == "fetch"
 
 # Booking workflow statuses (key -> label shown in the UI). Ordered.
 BOOKING_STATUSES = {
@@ -32,8 +49,21 @@ BOOKING_STATUSES = {
     "selesai": "Selesai",
     "reschedule": "Reschedule",
     "cancel": "Cancel",
-    "batal": "Batal",
 }
+
+# Service name used by the "Booking Maintenance" button on the maintenance
+# page. Also seeded as a ServiceType row on startup. Formerly split into
+# "Maintenance (body+kaca)" / "Maintenance (body saja)" - merged into one.
+MAINTENANCE_SERVICE_NAME = "Maintenance"
+
+# Legacy per-variant names kept only so bootstrap_defaults() can migrate any
+# existing ServiceType rows/bookings created before the merge.
+_LEGACY_MAINTENANCE_SERVICE_NAMES = ["Maintenance (body+kaca)", "Maintenance (body saja)"]
+
+# Allowed values for ServiceType.after_service, editable in Settings >
+# Manajemen Layanan. A booking whose service has this set to any non-empty
+# value gets a MaintenanceReminder created when it's marked "selesai".
+VALID_AFTER_SERVICE_VALUES = {"", "Maintenance"}
 
 # Which statuses trigger customer notifications
 NOTIFY_ON_STATUS = {"siap_diambil", "selesai"}
@@ -80,17 +110,68 @@ DEFAULT_REVIEW_REQUEST_TEMPLATE = (
 )
 
 
+def normalize_whatsapp_number(phone: str) -> str:
+    """Normalize a WhatsApp phone number by stripping non-digits."""
+    digits = re.sub(r"\D", "", str(phone or ""))
+    return digits if 8 <= len(digits) <= 15 else ""
+
+
+def validate_active_whatsapp_number(phone: str) -> str:
+    """Return an error message if a phone fails strict WhatsApp validation.
+
+    Confirmed non-existent numbers are rejected. Empty string means the
+    number passed (including when the bridge check is inconclusive, e.g.
+    the bridge is offline - saves aren't blocked by bridge downtime).
+    """
+    normalized = normalize_whatsapp_number(phone)
+    if not normalized:
+        return "Format nomor WhatsApp tidak valid"
+    registered, _ = check_whatsapp_number_registered(normalized)
+    if registered is False:
+        return "Nomor WhatsApp tidak ditemukan/tidak aktif di WhatsApp"
+    return ""
+
+
 def booking_notify_target(customer) -> str:
     """Resolve where a customer notification should be delivered."""
     if customer is None:
         return ""
-    phone = str(customer.phone or "").strip()
-    if phone.isdigit():
-        return f"{phone}@c.us"
+    normalized_phone = normalize_whatsapp_number(customer.phone or "")
+    if normalized_phone:
+        return f"{normalized_phone}@c.us"
     lid = str(getattr(customer, "lid", "") or "").strip()
     if lid.isdigit():
         return f"{lid}@lid"
     return ""
+
+
+def booking_notify_target_parts(customer) -> tuple[str, str | None]:
+    """Return a numeric phone and optional WhatsApp chat_id for a customer."""
+    if customer is None:
+        return "", None
+    normalized_phone = normalize_whatsapp_number(customer.phone or "")
+    lid = str(getattr(customer, "lid", "") or "").strip()
+    if normalized_phone:
+        return normalized_phone, f"{normalized_phone}@c.us"
+    if lid.isdigit():
+        return "", f"{lid}@lid"
+    return "", None
+
+
+def split_whatsapp_target(target: str) -> tuple[str, str | None]:
+    """Split a WhatsApp delivery target into phone and chat_id parts."""
+    target = str(target or "").strip()
+    if not target:
+        return "", None
+    if "@" not in target:
+        return target, None
+    identity, suffix = target.split("@", 1)
+    suffix = suffix.lower()
+    if suffix == "c.us":
+        return identity, target
+    if suffix == "lid":
+        return "", target
+    return identity, target
 
 
 def booking_done_message(booking) -> str:
@@ -336,26 +417,54 @@ def parse_schedule_text(text: str) -> datetime | None:
 
 
 def create_booking_from_form(form: dict, data: dict) -> Booking | None:
-    """Create (or reuse) a customer and a pending booking from a parsed form."""
+    """Create (or reuse) a customer and a pending booking from a parsed form.
+
+    Applies the same validation rules as a manual booking (vehicle type
+    required, strict WhatsApp number check, schedule conflict check). When a
+    check fails, no booking is created; the failure is only recorded in the
+    audit log so CS can follow up manually from the inbox.
+    """
     phone = _normalize_form_phone(form.get("phone", ""))
     name = (form.get("name") or "").strip() or "Pelanggan WhatsApp"
+    vehicle_type = (form.get("vehicle_type") or "").strip()
     if not phone:
         return None
 
+    def reject(reason: str) -> None:
+        db.session.add(
+            AuditLog(
+                actor_user_id=None,
+                action="booking.from_whatsapp_rejected",
+                details=f"customer={phone} reason={reason}",
+            )
+        )
+        db.session.commit()
+
+    if not vehicle_type:
+        reject("Jenis kendaraan wajib diisi")
+        return None
+
+    existing_customer = Customer.query.filter_by(phone=phone).first()
+    if existing_customer is None:
+        wa_error = validate_active_whatsapp_number(phone)
+        if wa_error:
+            reject(wa_error)
+            return None
+
     # Upsert the customer.
-    customer = Customer.query.filter_by(phone=phone).first()
+    customer = existing_customer
     if customer is None:
         customer = Customer(
             name=name,
             phone=phone,
-            vehicle_info=form.get("vehicle_type") or None,
+            vehicle_info=vehicle_type or None,
             notes=form.get("domicile") or "Dari form WhatsApp",
         )
         db.session.add(customer)
         db.session.flush()
     else:
-        if form.get("vehicle_type") and not customer.vehicle_info:
-            customer.vehicle_info = form.get("vehicle_type")
+        if vehicle_type and not customer.vehicle_info:
+            customer.vehicle_info = vehicle_type
         if name and (
             not customer.name
             or customer.name.startswith("WhatsApp ")
@@ -392,6 +501,17 @@ def create_booking_from_form(form: dict, data: dict) -> Booking | None:
     if duplicate:
         db.session.commit()
         return duplicate
+
+    if has_conflict(start_time, end_time):
+        db.session.add(
+            AuditLog(
+                actor_user_id=None,
+                action="booking.from_whatsapp_rejected",
+                details=f"customer={phone} reason=Slot penuh untuk hari tersebut",
+            )
+        )
+        db.session.commit()
+        return None
 
     detail_lines = ["Booking dari WhatsApp"]
     
@@ -527,15 +647,113 @@ def build_message_view(msg: WhatsAppMessage) -> dict:
     }
 
 
+_DEFAULT_USERS = [
+    ("admin", "SEED_ADMIN_PASSWORD", "admin123", "admin"),
+    ("cs1", "SEED_CS_PASSWORD", "cs123", "cs"),
+    ("tech1", "SEED_TECH_PASSWORD", "tech123", "technician"),
+]
+
+
+def seed_default_users() -> None:
+    """Create the default first-run accounts (admin/cs1/tech1) via the ORM if
+    they don't already exist. Safe to run on every startup - existing
+    usernames are left untouched. Passwords can be overridden via env vars
+    (SEED_ADMIN_PASSWORD/SEED_CS_PASSWORD/SEED_TECH_PASSWORD); if unset, the
+    insecure hardcoded defaults are used and a warning is logged so they get
+    changed before going to production."""
+    for username, env_var, default_password, role in _DEFAULT_USERS:
+        if User.query.filter_by(username=username).first():
+            continue
+        raw_password = os.getenv(env_var)
+        if not raw_password:
+            raw_password = default_password
+            current_app.logger.warning(
+                "%s is not set - seeding user '%s' with the insecure default "
+                "password. Set %s and change the password before deploying "
+                "to production.",
+                env_var,
+                username,
+                env_var,
+            )
+        user = User(username=username, role=role, active=True)
+        user.set_password(raw_password)
+        db.session.add(user)
+    db.session.commit()
+
+
+def _ensure_after_service_column() -> None:
+    """db.create_all() only creates missing tables, it doesn't add columns to
+    tables that already exist - add ServiceType.after_service via raw SQL if
+    it's missing. Postgres-only (dev/prod); fresh SQLite test DBs already
+    have the column since they're created from the current models."""
+    if db.engine.dialect.name != "postgresql":
+        return
+    result = db.session.execute(
+        text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'service_type' AND column_name = 'after_service'"
+        )
+    ).fetchone()
+    if not result:
+        db.session.execute(text("ALTER TABLE service_type ADD COLUMN after_service VARCHAR(50)"))
+        db.session.commit()
+
+
+# Default After Service values seeded for the built-in services (only
+# applied when the column is still empty, so manual edits in Settings stick).
+_DEFAULT_AFTER_SERVICE = {
+    "PPF": "Maintenance",
+    "Coating Premium": "Maintenance",
+    MAINTENANCE_SERVICE_NAME: "Maintenance",
+}
+
+
+def _seed_after_service_defaults() -> None:
+    for name, value in _DEFAULT_AFTER_SERVICE.items():
+        service = ServiceType.query.filter_by(name=name).first()
+        if service and not service.after_service:
+            service.after_service = value
+    db.session.commit()
+
+
+def _normalize_after_service_values() -> None:
+    """One-time migration: the old "Maintenance (loop)" value was removed;
+    collapse any existing rows still set to it down to plain "Maintenance"."""
+    ServiceType.query.filter_by(after_service="Maintenance (loop)").update(
+        {"after_service": "Maintenance"}
+    )
+    db.session.commit()
+
+
+def _merge_legacy_maintenance_services() -> None:
+    """One-time migration: merge the old body+kaca/body-saja ServiceType rows
+    into the single MAINTENANCE_SERVICE_NAME service, re-pointing any
+    existing bookings before dropping the legacy rows. Safe to run on every
+    startup - it's a no-op once the legacy rows are gone."""
+    legacy_services = ServiceType.query.filter(
+        ServiceType.name.in_(_LEGACY_MAINTENANCE_SERVICE_NAMES)
+    ).all()
+    if not legacy_services:
+        return
+
+    canonical = ServiceType.query.filter_by(name=MAINTENANCE_SERVICE_NAME).first()
+    if not canonical:
+        canonical = ServiceType(name=MAINTENANCE_SERVICE_NAME, duration_minutes=90)
+        db.session.add(canonical)
+        db.session.flush()
+
+    for legacy in legacy_services:
+        Booking.query.filter_by(service_type_id=legacy.id).update(
+            {"service_type_id": canonical.id}
+        )
+        db.session.delete(legacy)
+
+    db.session.commit()
+
+
 def bootstrap_defaults() -> None:
-    if User.query.count() == 0:
-        admin = User(username="admin", role="admin")
-        admin.set_password("admin123")
-        cs1 = User(username="cs1", role="cs")
-        cs1.set_password("cs123")
-        tech1 = User(username="tech1", role="technician")
-        tech1.set_password("tech123")
-        db.session.add_all([admin, cs1, tech1])
+    seed_default_users()
+    _ensure_after_service_column()
 
     defaults = [
         ("Interior Detailing", 480),  # 8 jam
@@ -545,6 +763,7 @@ def bootstrap_defaults() -> None:
         ("Glass Polishing", 120),  # 2 jam
         ("Cuci Mobil", 15),  # 15 menit
         ("Lainnya", 120),  # 2 jam - default untuk package yang tidak match
+        (MAINTENANCE_SERVICE_NAME, 90),  # 1.5 jam
     ]
     for name, duration in defaults:
         existing = ServiceType.query.filter_by(name=name).first()
@@ -553,10 +772,22 @@ def bootstrap_defaults() -> None:
 
     db.session.commit()
 
+    _merge_legacy_maintenance_services()
+    _normalize_after_service_values()
+    _seed_after_service_defaults()
+
 
 def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
+    # Config.SQLALCHEMY_DATABASE_URI is frozen at first import of app.config (os.getenv
+    # read once at class-definition time). Re-read the env var here so tests that set
+    # os.environ["DATABASE_URL"] before calling create_app() actually take effect instead
+    # of silently binding to whatever DATABASE_URL the process started with (e.g. the
+    # real production database) - see repo memory for the incident this caused.
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
+        "DATABASE_URL", app.config["SQLALCHEMY_DATABASE_URI"]
+    )
     db.init_app(app)
 
     with app.app_context():
@@ -607,16 +838,18 @@ def create_app() -> Flask:
             bookings_today=bookings_today,
             pending=pending,
             customers=customers,
+            partial=wants_partial(),
         )
 
     @app.route("/bookings", methods=["GET", "POST"])
     @require_roles("admin", "cs")
     def bookings():
-        message = None
+        message = request.args.get("sync_ok")
         error = None
 
         def render_bookings():
-            data = Booking.query.order_by(Booking.scheduled_start.asc()).all()
+            data = Booking.query.filter(~Booking.status.in_(["cancel", "selesai"]))
+            data = data.order_by(Booking.scheduled_start.asc()).all()
             services = ServiceType.query.filter_by(active=True).all()
             notify = {}
             for b in data:
@@ -633,6 +866,7 @@ def create_app() -> Flask:
                 notify=notify,
                 message=message,
                 error=error,
+                partial=wants_partial(),
             )
 
         if request.method == "POST":
@@ -660,9 +894,10 @@ def create_app() -> Flask:
                     message = f"Status booking #{booking.id} diperbarui menjadi '{BOOKING_STATUSES[new_status]}'"
                     if new_status == "selesai":
                         message += " — cek & kirim notifikasi ke customer di bawah."
-                        # Create maintenance reminder if service is Coating Premium or PPF
+                        # Create a maintenance reminder if this service's "After Service"
+                        # (configurable in Settings > Manajemen Layanan) is set.
                         service_name = booking.service_type.name
-                        if service_name in ["Coating Premium", "PPF"]:
+                        if booking.service_type.after_service:
                             existing_reminder = MaintenanceReminder.query.filter_by(booking_id=booking.id).first()
                             if not existing_reminder:
                                 maintenance_due = datetime.utcnow() + timedelta(days=180)  # 6 months
@@ -695,7 +930,7 @@ def create_app() -> Flask:
                             target.split("@", 1)[0], text, chat_id=target
                         )
                         if sent.status == "failed":
-                            error = "Gagal mengirim notifikasi (cek koneksi WhatsApp)"
+                            error = f"Gagal mengirim notifikasi: {sent.status}"
                         else:
                             db.session.add(
                                 AuditLog(
@@ -708,6 +943,46 @@ def create_app() -> Flask:
                             message = f"Notifikasi terkirim ke {booking.customer.name}"
                 return render_bookings()
 
+            if action == "request_reschedule":
+                booking_id = int(request.form.get("booking_id", "0") or 0)
+                new_date_raw = request.form.get("new_scheduled_start", "").strip()
+                booking = Booking.query.get(booking_id)
+                if not booking:
+                    error = "Booking tidak ditemukan"
+                elif booking.status == "reschedule":
+                    error = "Booking sudah dalam status reschedule"
+                else:
+                    if new_date_raw:
+                        try:
+                            try:
+                                new_date = datetime.strptime(new_date_raw, "%Y-%m-%dT%H:%M")
+                            except ValueError:
+                                new_date = datetime.strptime(new_date_raw, "%Y-%m-%d")
+                            requested_date = new_date.strftime("%d-%m-%Y")
+                        except ValueError:
+                            error = "Format tanggal tidak valid"
+                            requested_date = None
+                    else:
+                        requested_date = None
+
+                    if not error:
+                        booking.status = "reschedule"
+                        if requested_date:
+                            note_prefix = f"[Permintaan reschedule: {requested_date}]"
+                            booking.notes = (
+                                f"{note_prefix}\n{booking.notes}" if booking.notes else note_prefix
+                            )
+                        db.session.add(
+                            AuditLog(
+                                actor_user_id=current_user_id(),
+                                action="booking.request_reschedule",
+                                details=f"booking_id={booking.id} requested_date={requested_date or 'none'}",
+                            )
+                        )
+                        db.session.commit()
+                        message = f"Permintaan reschedule untuk booking #{booking.id} berhasil dikirim"
+                return render_bookings()
+
             customer_name = request.form.get("customer_name", "").strip()
             phone = request.form.get("phone", "").strip()
             vehicle_type = request.form.get("vehicle_type", "").strip()
@@ -717,12 +992,19 @@ def create_app() -> Flask:
             schedule_raw = request.form.get("scheduled_start", "").strip()
             notes = request.form.get("notes", "").strip()
 
+            if not customer_name or not phone:
+                error = "Nama pelanggan dan nomor WhatsApp wajib diisi"
+            elif not vehicle_type:
+                error = "Jenis kendaraan wajib diisi"
+
             service = None
             variant_info = None
             lainnya_service = ServiceType.query.filter_by(name="Lainnya").first()
             
             # If package_name is provided, use semantic matching to find the service
-            if package_name and not service_id:
+            if error:
+                pass
+            elif package_name and not service_id:
                 all_services = ServiceType.query.filter_by(active=True).all()
                 matched_service = match_package_to_service(package_name, all_services)
                 
@@ -755,18 +1037,28 @@ def create_app() -> Flask:
             
             start_time = None
             try:
-                start_time = datetime.strptime(schedule_raw, "%Y-%m-%dT%H:%M")
+                # Accept either full datetime (from older clients) or date-only.
+                try:
+                    start_time = datetime.strptime(schedule_raw, "%Y-%m-%dT%H:%M")
+                except ValueError:
+                    # date-only input: treat as start of day
+                    start_time = datetime.strptime(schedule_raw, "%Y-%m-%d")
             except ValueError:
                 error = "Format tanggal tidak valid"
 
             if service and start_time and not error:
                 end_time = compute_booking_end(service, start_time)
-                if not is_within_operating_hours(start_time, end_time):
-                    error = "Di luar jam operasional (09:00-18:00)"
-                elif has_conflict(start_time, end_time):
-                    error = "Jadwal bentrok dengan booking lain"
+                # Do not enforce operating hours check when schedule is date-only/user requested removal
+                if has_conflict(start_time, end_time):
+                    error = "Slot penuh untuk hari tersebut"
                 else:
                     customer = Customer.query.filter_by(phone=phone).first()
+                    if not customer:
+                        wa_error = validate_active_whatsapp_number(phone)
+                        if wa_error:
+                            error = wa_error
+
+                if not error:
                     if not customer:
                         customer = Customer(name=customer_name, phone=phone, vehicle_info=vehicle_type)
                         db.session.add(customer)
@@ -830,6 +1122,8 @@ def create_app() -> Flask:
                 # Validate customer data
                 if not customer_name or not phone:
                     error = "Nama pelanggan dan nomor WhatsApp wajib diisi"
+                elif not vehicle_type:
+                    error = "Jenis kendaraan wajib diisi"
                 elif not schedule_raw:
                     error = "Jadwal wajib diisi"
                 else:
@@ -861,56 +1155,62 @@ def create_app() -> Flask:
 
                     if not error and service:
                         try:
-                            start_time = datetime.strptime(schedule_raw, "%Y-%m-%dT%H:%M")
+                            try:
+                                start_time = datetime.strptime(schedule_raw, "%Y-%m-%dT%H:%M")
+                            except ValueError:
+                                start_time = datetime.strptime(schedule_raw, "%Y-%m-%d")
                         except ValueError:
                             error = "Format tanggal tidak valid"
-                        
+
                         if not error:
                             end_time = compute_booking_end(service, start_time)
-                            
-                            # Check operating hours
-                            if not is_within_operating_hours(start_time, end_time):
-                                error = "Di luar jam operasional (09:00-18:00)"
-                            # Check for conflicts (excluding current booking)
-                            elif has_conflict(start_time, end_time, exclude_booking_id=booking.id):
-                                error = "Jadwal bentrok dengan booking lain"
+
+                            # Do not enforce operating hours; still check conflicts (excluding current booking)
+                            if has_conflict(start_time, end_time, exclude_booking_id=booking.id):
+                                error = "Slot penuh untuk hari tersebut"
                             else:
-                                # Update customer info
                                 customer = booking.customer
-                                customer.name = customer_name
-                                
-                                # Check if phone number is being changed to a duplicate
+
+                                # If the phone now matches another existing customer,
+                                # that's the same real person under a different record -
+                                # re-link the booking to it instead of rejecting the edit.
+                                target_customer = customer
+                                existing_customer = None
                                 if customer.phone != phone:
                                     existing_customer = Customer.query.filter(
                                         Customer.phone == phone,
                                         Customer.id != customer.id
                                     ).first()
                                     if existing_customer:
-                                        error = "Nomor WhatsApp sudah terdaftar untuk customer lain"
-                                
-                                if not error:
-                                    customer.phone = phone
-                                    customer.vehicle_info = vehicle_type or None
-                                    
-                                    # Update booking info
-                                    booking.service_type_id = service.id
-                                    booking.scheduled_start = start_time
-                                    booking.scheduled_end = end_time
-                                    booking.notes = notes
-                                    booking.other_info = package_name
-                                    booking.vehicle_type = vehicle_type
-                                    booking.license_plate = license_plate
-                                    
-                                    db.session.add(
-                                        AuditLog(
-                                            actor_user_id=current_user_id(),
-                                            action="booking.edit",
-                                            details=f"booking_id={booking.id} customer={customer.phone} service={service.name}",
-                                        )
+                                        target_customer = existing_customer
+                                        booking.customer_id = existing_customer.id
+                                    else:
+                                        error = validate_active_whatsapp_number(phone)
+
+                            if not error:
+                                target_customer.name = customer_name
+                                target_customer.phone = phone
+                                target_customer.vehicle_info = vehicle_type or None
+
+                                # Update booking info
+                                booking.service_type_id = service.id
+                                booking.scheduled_start = start_time
+                                booking.scheduled_end = end_time
+                                booking.notes = notes
+                                booking.other_info = package_name
+                                booking.vehicle_type = vehicle_type
+                                booking.license_plate = license_plate
+
+                                db.session.add(
+                                    AuditLog(
+                                        actor_user_id=current_user_id(),
+                                        action="booking.edit",
+                                        details=f"booking_id={booking.id} customer={target_customer.phone} service={service.name}",
                                     )
-                                    db.session.commit()
-                                    message = "Booking berhasil diperbarui"
-                                    return redirect(url_for("bookings"))
+                                )
+                                db.session.commit()
+                                message = "Booking berhasil diperbarui"
+                                return redirect(url_for("bookings"))
 
         return render_template(
             "edit_booking.html",
@@ -919,6 +1219,7 @@ def create_app() -> Flask:
             statuses=BOOKING_STATUSES,
             message=message,
             error=error,
+            partial=wants_partial(),
         )
 
     @app.route("/customers", methods=["GET", "POST"])
@@ -967,7 +1268,10 @@ def create_app() -> Flask:
                         customer = Customer.query.get(customer_id)
                         if not customer:
                             error = "Kontak tidak ditemukan"
-                        else:
+                        elif customer.phone != phone:
+                            error = validate_active_whatsapp_number(phone)
+
+                        if not error and customer:
                             customer.name = name
                             customer.phone = phone
                             customer.vehicle_info = vehicle or None
@@ -982,22 +1286,24 @@ def create_app() -> Flask:
                             db.session.commit()
                             message = "Kontak berhasil diperbarui"
                     else:
-                        customer = Customer(
-                            name=name,
-                            phone=phone,
-                            vehicle_info=vehicle or None,
-                            notes=notes or None,
-                        )
-                        db.session.add(customer)
-                        db.session.add(
-                            AuditLog(
-                                actor_user_id=current_user_id(),
-                                action="customer.create",
-                                details=f"phone={phone}",
+                        error = validate_active_whatsapp_number(phone)
+                        if not error:
+                            customer = Customer(
+                                name=name,
+                                phone=phone,
+                                vehicle_info=vehicle or None,
+                                notes=notes or None,
                             )
-                        )
-                        db.session.commit()
-                        message = "Kontak berhasil ditambahkan"
+                            db.session.add(customer)
+                            db.session.add(
+                                AuditLog(
+                                    actor_user_id=current_user_id(),
+                                    action="customer.create",
+                                    details=f"phone={phone}",
+                                )
+                            )
+                            db.session.commit()
+                            message = "Kontak berhasil ditambahkan"
 
         search = request.args.get("q", "").strip()
         query = Customer.query
@@ -1020,6 +1326,7 @@ def create_app() -> Flask:
             search=search,
             message=message,
             error=error,
+            partial=wants_partial(),
         )
 
     @app.route("/customers/sync", methods=["POST"])
@@ -1128,7 +1435,7 @@ def create_app() -> Flask:
                     db.session.commit()
                     message = "User berhasil ditambahkan"
         all_users = User.query.order_by(User.created_at.desc()).all()
-        return render_template("users.html", users=all_users, message=message)
+        return render_template("users.html", users=all_users, message=message, partial=wants_partial())
 
     @app.route("/inbox")
     @require_roles("admin", "cs")
@@ -1173,7 +1480,7 @@ def create_app() -> Flask:
         )
         last_id = messages[-1].id if messages else 0
         return render_template(
-            "inbox.html", conversations=conversation_list, last_id=last_id
+            "inbox.html", conversations=conversation_list, last_id=last_id, partial=wants_partial()
         )
 
     @app.route("/api/whatsapp/stream")
@@ -1238,6 +1545,81 @@ def create_app() -> Flask:
         ok = message.status not in {"failed"}
         return jsonify({"ok": ok, "status": message.status, "message": view})
 
+    @app.route("/history", methods=["GET"])
+    @require_roles("admin", "cs")
+    def history():
+        data = Booking.query.filter(Booking.status.in_(["cancel", "selesai"]))
+        data = data.order_by(Booking.scheduled_start.asc()).all()
+
+        # A car whose service has "After Service" = Maintenance can come back for
+        # maintenance many times - surface last maintenance date/service + total
+        # count on that original row.
+        maintenance_names = {MAINTENANCE_SERVICE_NAME}
+        maintenance_bookings = (
+            Booking.query.join(ServiceType)
+            .filter(ServiceType.name.in_(maintenance_names), Booking.status == "selesai")
+            .order_by(Booking.scheduled_start.desc())
+            .all()
+        )
+        maintenance_by_key: dict[tuple, list[Booking]] = {}
+        for mb in maintenance_bookings:
+            key = (mb.customer_id, mb.license_plate)
+            maintenance_by_key.setdefault(key, []).append(mb)
+
+        maintenance_stats = {}
+        for item in data:
+            if item.service_type.after_service:
+                matches = maintenance_by_key.get((item.customer_id, item.license_plate), [])
+                if matches:
+                    latest = matches[0]  # already ordered desc by scheduled_start
+                    maintenance_stats[item.id] = {
+                        "count": len(matches),
+                        "last_date": latest.scheduled_start,
+                        "last_service": latest.service_type.name,
+                    }
+
+        return render_template(
+            "history.html",
+            bookings=data,
+            statuses=BOOKING_STATUSES,
+            maintenance_stats=maintenance_stats,
+            partial=wants_partial(),
+        )
+
+    @app.route("/whatsapp-followups", methods=["GET"])
+    @require_roles("admin", "cs")
+    def whatsapp_followups():
+        """Bookings a WhatsApp customer tried to submit that failed strict
+        validation (bad vehicle type / unregistered number / full slot) - CS
+        needs to see these to follow up manually since no booking was created."""
+        logs = (
+            AuditLog.query.filter_by(action="booking.from_whatsapp_rejected")
+            .order_by(AuditLog.id.desc())
+            .limit(200)
+            .all()
+        )
+        followups = []
+        for log in logs:
+            details = log.details or ""
+            m = re.match(r"customer=(\S*)\s+reason=(.*)", details)
+            phone = m.group(1) if m else ""
+            reason = m.group(2) if m else details
+            customer = Customer.query.filter_by(phone=phone).first() if phone else None
+            followups.append(
+                {
+                    "id": log.id,
+                    "created_at": log.created_at,
+                    "phone": phone,
+                    "reason": reason,
+                    "customer_name": customer.name if customer else "",
+                }
+            )
+        return render_template(
+            "whatsapp_followups.html",
+            followups=followups,
+            partial=wants_partial(),
+        )
+
     @app.route("/reschedule", methods=["GET", "POST"])
     @require_roles("admin", "cs")
     def reschedule():
@@ -1260,6 +1642,7 @@ def create_app() -> Flask:
                 notify=notify,
                 message=message,
                 error=error,
+                partial=wants_partial(),
             )
 
         if request.method == "POST":
@@ -1268,7 +1651,11 @@ def create_app() -> Flask:
             if action == "send_reminder":
                 booking_id = int(request.form.get("booking_id", "0") or 0)
                 text = request.form.get("message", "").strip()
+                new_date_str = request.form.get("new_scheduled_start", "").strip()
                 booking = Booking.query.get(booking_id)
+                new_start = None
+                new_end = None
+
                 if not booking:
                     error = "Booking tidak ditemukan"
                 elif not text:
@@ -1278,21 +1665,49 @@ def create_app() -> Flask:
                     if not target:
                         error = "Nomor WhatsApp customer tidak tersedia"
                     else:
-                        sent = send_and_log_message(
-                            target.split("@", 1)[0], text, chat_id=target
-                        )
-                        if sent.status == "failed":
-                            error = "Gagal mengirim reminder (cek koneksi WhatsApp)"
-                        else:
-                            db.session.add(
-                                AuditLog(
-                                    actor_user_id=current_user_id(),
-                                    action="booking.reschedule_reminder",
-                                    details=f"booking_id={booking.id} to={target.split('@', 1)[0]}",
-                                )
-                            )
-                            db.session.commit()
-                            message = f"Reminder terkirim ke {booking.customer.name}"
+                        if new_date_str:
+                            try:
+                                try:
+                                    new_start = datetime.strptime(new_date_str, "%Y-%m-%dT%H:%M")
+                                except ValueError:
+                                    new_start = datetime.strptime(new_date_str, "%Y-%m-%d")
+                                new_end = compute_booking_end(booking.service_type, new_start)
+                                if has_conflict(new_start, new_end, exclude_booking_id=booking.id):
+                                    error = "Slot penuh untuk hari tersebut"
+                            except ValueError:
+                                error = "Format tanggal tidak valid"
+
+                        if not error:
+                            phone_target, chat_id_target = booking_notify_target_parts(booking.customer)
+                            if not phone_target and not chat_id_target:
+                                error = "Nomor WhatsApp customer tidak tersedia"
+                            else:
+                                sent = send_and_log_message(phone_target, text, chat_id=chat_id_target)
+                                if sent.status == "failed":
+                                    error = f"Gagal mengirim reminder: {sent.status}"
+                                else:
+                                    if new_start is not None:
+                                        booking.scheduled_start = new_start
+                                        booking.scheduled_end = new_end
+                                        booking.status = "dikonfirmasi"
+                                        db.session.add(
+                                            AuditLog(
+                                                actor_user_id=current_user_id(),
+                                                action="booking.reschedule_confirm",
+                                                details=f"booking_id={booking.id} new_start={new_start.isoformat()}",
+                                            )
+                                        )
+                                        message = f"Reminder terkirim ke {booking.customer.name} dan booking dikonfirmasi"
+                                    else:
+                                        db.session.add(
+                                            AuditLog(
+                                                actor_user_id=current_user_id(),
+                                                action="booking.reschedule_reminder",
+                                                details=f"booking_id={booking.id} to={target.split('@', 1)[0]}",
+                                            )
+                                        )
+                                        message = f"Reminder terkirim ke {booking.customer.name}"
+                                    db.session.commit()
                 return render_reschedules()
 
             if action == "confirm_reschedule":
@@ -1306,13 +1721,15 @@ def create_app() -> Flask:
                     error = "Booking tidak dalam status reschedule"
                 else:
                     try:
-                        new_start = datetime.strptime(new_date_str, "%Y-%m-%dT%H:%M")
+                        try:
+                            new_start = datetime.strptime(new_date_str, "%Y-%m-%dT%H:%M")
+                        except ValueError:
+                            new_start = datetime.strptime(new_date_str, "%Y-%m-%d")
                         new_end = compute_booking_end(booking.service_type, new_start)
 
-                        if not is_within_operating_hours(new_start, new_end):
-                            error = "Jadwal baru di luar jam operasional (09:00-18:00)"
-                        elif has_conflict(new_start, new_end, exclude_booking_id=booking.id):
-                            error = "Jadwal baru bentrok dengan booking lain"
+                        # Do not enforce operating hours; only check conflicts
+                        if has_conflict(new_start, new_end, exclude_booking_id=booking.id):
+                            error = "Slot penuh untuk hari tersebut"
                         else:
                             booking.scheduled_start = new_start
                             booking.scheduled_end = new_end
@@ -1352,26 +1769,24 @@ def create_app() -> Flask:
                     error = "Maintenance reminder tidak ditemukan"
                 else:
                     customer = reminder.customer
-                    template = get_setting("maintenance_reminder_template", DEFAULT_MAINTENANCE_REMINDER_TEMPLATE)
-                    message_text = template.format(
-                        nama=customer.name,
-                        layanan=reminder.service_type,
-                        tanggal_selesai=reminder.completed_at.strftime("%d-%m-%Y")
-                    )
-                    sent = send_and_log_message(customer.phone, message_text)
-                    if sent.status == "failed":
-                        error = f"Gagal kirim reminder: {sent.status}"
+                    message_text = request.form.get("message", "").strip()
+                    if not message_text:
+                        error = "Pesan tidak boleh kosong"
                     else:
-                        reminder.reminder_sent_at = datetime.utcnow()
-                        db.session.add(
-                            AuditLog(
-                                actor_user_id=current_user_id(),
-                                action="maintenance.reminder_sent",
-                                details=f"reminder_id={reminder_id} customer={customer.phone}",
+                        sent = send_and_log_message(customer.phone, message_text)
+                        if sent.status == "failed":
+                            error = f"Gagal kirim reminder: {sent.status}"
+                        else:
+                            reminder.reminder_sent_at = datetime.utcnow()
+                            db.session.add(
+                                AuditLog(
+                                    actor_user_id=current_user_id(),
+                                    action="maintenance.reminder_sent",
+                                    details=f"reminder_id={reminder_id} customer={customer.phone}",
+                                )
                             )
-                        )
-                        db.session.commit()
-                        message = f"Maintenance reminder terkirim ke {customer.name}"
+                            db.session.commit()
+                            message = f"Maintenance reminder terkirim ke {customer.name}"
             
             elif action == "send_review":
                 reminder_id = int(request.form.get("reminder_id", "0") or 0)
@@ -1380,40 +1795,107 @@ def create_app() -> Flask:
                     error = "Maintenance reminder tidak ditemukan"
                 else:
                     customer = reminder.customer
-                    # Get Google Maps review link from settings
-                    review_link = get_setting("google_maps_business_url", "https://maps.google.com")
-                    template = get_setting("review_request_template", DEFAULT_REVIEW_REQUEST_TEMPLATE)
-                    message_text = template.format(
-                        nama=customer.name,
-                        layanan=reminder.service_type,
-                        link_review=review_link
-                    )
-                    sent = send_and_log_message(customer.phone, message_text)
-                    if sent.status == "failed":
-                        error = f"Gagal kirim review request: {sent.status}"
+                    message_text = request.form.get("message", "").strip()
+                    if not message_text:
+                        error = "Pesan tidak boleh kosong"
                     else:
-                        reminder.review_requested_at = datetime.utcnow()
+                        sent = send_and_log_message(customer.phone, message_text)
+                        if sent.status == "failed":
+                            error = f"Gagal kirim review request: {sent.status}"
+                        else:
+                            reminder.review_requested_at = datetime.utcnow()
+                            db.session.add(
+                                AuditLog(
+                                    actor_user_id=current_user_id(),
+                                    action="maintenance.review_requested",
+                                    details=f"reminder_id={reminder_id} customer={customer.phone}",
+                                )
+                            )
+                            db.session.commit()
+                            message = f"Review request terkirim ke {customer.name}"
+
+            elif action == "book_maintenance":
+                reminder_id = int(request.form.get("reminder_id", "0") or 0)
+                service_name = MAINTENANCE_SERVICE_NAME
+                reminder = MaintenanceReminder.query.get(reminder_id)
+                if not reminder:
+                    error = "Maintenance reminder tidak ditemukan"
+                else:
+                    service = ServiceType.query.filter_by(name=service_name).first()
+                    if not service:
+                        error = f"Layanan '{service_name}' belum tersedia di Settings"
+                    else:
+                        schedule_raw = request.form.get("scheduled_start", "").strip()
+                        try:
+                            start_time = datetime.strptime(schedule_raw, "%Y-%m-%d")
+                        except ValueError:
+                            start_time = None
+                            error = "Tanggal booking wajib diisi dengan format yang valid"
+
+                    if not error and service and reminder:
+                        customer = reminder.customer
+                        original_booking = reminder.booking
+                        end_time = compute_booking_end(service, start_time)
+                        new_booking = Booking(
+                            customer_id=customer.id,
+                            service_type_id=service.id,
+                            scheduled_start=start_time,
+                            scheduled_end=end_time,
+                            status="dikonfirmasi",
+                            source="maintenance",
+                            notes=f"Booking maintenance dari reminder #{reminder.id}",
+                            vehicle_type=(original_booking.vehicle_type if original_booking else None) or customer.vehicle_info,
+                            license_plate=original_booking.license_plate if original_booking else None,
+                            created_by_user_id=current_user_id(),
+                        )
+                        db.session.add(new_booking)
                         db.session.add(
                             AuditLog(
                                 actor_user_id=current_user_id(),
-                                action="maintenance.review_requested",
-                                details=f"reminder_id={reminder_id} customer={customer.phone}",
+                                action="maintenance.booking_created",
+                                details=f"reminder_id={reminder.id} customer={customer.phone} service={service.name}",
                             )
                         )
+                        db.session.delete(reminder)
                         db.session.commit()
-                        message = f"Review request terkirim ke {customer.name}"
+                        message = (
+                            f"Booking '{service.name}' berhasil dibuat untuk {customer.name}. "
+                            "Atur tanggal jadwalnya di halaman Bookings."
+                        )
 
         # Get all active maintenance reminders (not yet sent or sent but reminder pending)
         reminders = MaintenanceReminder.query.join(Customer).join(Booking).order_by(
             MaintenanceReminder.maintenance_due_at.asc()
         ).all()
 
+        # Pre-fill editable message drafts per reminder so CS/admin can tweak
+        # the text before it's actually sent.
+        reminder_template = get_setting("maintenance_reminder_template", DEFAULT_MAINTENANCE_REMINDER_TEMPLATE)
+        review_template = get_setting("review_request_template", DEFAULT_REVIEW_REQUEST_TEMPLATE)
+        review_link = get_setting("google_maps_business_url", "https://maps.google.com")
+        drafts = {}
+        for reminder in reminders:
+            drafts[reminder.id] = {
+                "reminder_message": reminder_template.format(
+                    nama=reminder.customer.name,
+                    layanan=reminder.service_type,
+                    tanggal_selesai=reminder.completed_at.strftime("%d-%m-%Y"),
+                ),
+                "review_message": review_template.format(
+                    nama=reminder.customer.name,
+                    layanan=reminder.service_type,
+                    link_review=review_link,
+                ),
+            }
+
         return render_template(
             "maintenance.html",
             reminders=reminders,
+            drafts=drafts,
             message=message,
             error=error,
             now=datetime.utcnow(),
+            partial=wants_partial(),
         )
 
     @app.route("/settings", methods=["GET", "POST"])
@@ -1421,7 +1903,14 @@ def create_app() -> Flask:
     def settings():
         message = None
         error = None
-        setting_keys = ["wa_mode", "booking_done_template", "reschedule_template", "maintenance_reminder_template", "review_request_template", "google_maps_business_url"]
+        setting_keys = [
+            "booking_done_template",
+            "reschedule_template",
+            "maintenance_reminder_template",
+            "review_request_template",
+            "google_maps_business_url",
+            "daily_capacity",
+        ]
 
         if request.method == "POST":
             action = request.form.get("action", "save")
@@ -1429,6 +1918,7 @@ def create_app() -> Flask:
                 name = request.form.get("service_name", "").strip()
                 duration_value = request.form.get("service_duration", "").strip()
                 duration_unit = request.form.get("service_unit", "menit").strip()
+                after_service = request.form.get("service_after_service", "").strip()
                 try:
                     duration_num = float(duration_value)
                     # Convert to minutes
@@ -1438,18 +1928,25 @@ def create_app() -> Flask:
                     
                     if not name or len(name) < 3:
                         error = "Nama layanan harus minimal 3 karakter"
+                    elif after_service not in VALID_AFTER_SERVICE_VALUES:
+                        error = "After Service tidak valid"
                     else:
                         existing = ServiceType.query.filter_by(name=name).first()
                         if existing:
                             error = "Layanan dengan nama ini sudah ada"
                         else:
-                            service = ServiceType(name=name, duration_minutes=duration_minutes, active=True)
+                            service = ServiceType(
+                                name=name,
+                                duration_minutes=duration_minutes,
+                                active=True,
+                                after_service=after_service or None,
+                            )
                             db.session.add(service)
                             db.session.add(
                                 AuditLog(
                                     actor_user_id=current_user_id(),
                                     action="service.create",
-                                    details=f"name={name} duration={duration_num}{duration_unit}",
+                                    details=f"name={name} duration={duration_num}{duration_unit} after_service={after_service or '-'}",
                                 )
                             )
                             db.session.commit()
@@ -1461,6 +1958,7 @@ def create_app() -> Flask:
                 name = request.form.get("service_name", "").strip()
                 duration_value = request.form.get("service_duration", "").strip()
                 duration_unit = request.form.get("service_unit", "menit").strip()
+                after_service = request.form.get("service_after_service", "").strip()
                 service = ServiceType.query.get(service_id)
                 if not service:
                     error = "Layanan tidak ditemukan"
@@ -1474,6 +1972,8 @@ def create_app() -> Flask:
                         
                         if not name or len(name) < 3:
                             error = "Nama layanan harus minimal 3 karakter"
+                        elif after_service not in VALID_AFTER_SERVICE_VALUES:
+                            error = "After Service tidak valid"
                         else:
                             # Check for name conflict with other services
                             conflict = ServiceType.query.filter(
@@ -1484,11 +1984,12 @@ def create_app() -> Flask:
                             else:
                                 service.name = name
                                 service.duration_minutes = duration_minutes
+                                service.after_service = after_service or None
                                 db.session.add(
                                     AuditLog(
                                         actor_user_id=current_user_id(),
                                         action="service.update",
-                                        details=f"service_id={service_id} name={name} duration={duration_num}{duration_unit}",
+                                        details=f"service_id={service_id} name={name} duration={duration_num}{duration_unit} after_service={after_service or '-'}",
                                     )
                                 )
                                 db.session.commit()
@@ -1532,11 +2033,6 @@ def create_app() -> Flask:
                     db.session.commit()
                     message = f"Layanan '{service.name}' berhasil {status}"
             elif action == "save":
-                wa_mode = request.form.get("wa_mode", "mock").strip().lower()
-                if wa_mode not in {"mock", "bridge"}:
-                    wa_mode = "mock"
-
-                set_setting("wa_mode", wa_mode)
                 auto_public = request.url_root.strip().rstrip("/")
                 set_setting("public_base_url", auto_public)
 
@@ -1556,6 +2052,14 @@ def create_app() -> Flask:
                 if review_request_template:
                     set_setting("review_request_template", review_request_template)
 
+                daily_capacity = request.form.get("daily_capacity", "").strip()
+                if daily_capacity:
+                    try:
+                        int(daily_capacity)
+                        set_setting("daily_capacity", daily_capacity)
+                    except ValueError:
+                        error = "Daily capacity harus berupa angka bulat"
+
                 google_maps_business_url = request.form.get("google_maps_business_url", "").strip()
                 if google_maps_business_url:
                     set_setting("google_maps_business_url", google_maps_business_url)
@@ -1564,7 +2068,7 @@ def create_app() -> Flask:
                     AuditLog(
                         actor_user_id=current_user_id(),
                         action="settings.whatsapp.update",
-                        details=f"wa_mode={wa_mode}",
+                        details="bridge-only",
                     )
                 )
                 db.session.commit()
@@ -1580,10 +2084,44 @@ def create_app() -> Flask:
                         error = "Gagal kirim. Pastikan bridge QR aktif, API key benar, dan session QR sudah tersambung"
                     else:
                         message = f"Pesan test terkirim dengan status: {sent.status}"
+            elif action == "wa_number_add":
+                label = request.form.get("wa_number_label", "").strip()
+                if not label:
+                    error = "Nama/label nomor WhatsApp wajib diisi"
+                else:
+                    ok, status, instance = create_wa_instance(label)
+                    if ok and instance:
+                        db.session.add(
+                            AuditLog(
+                                actor_user_id=current_user_id(),
+                                action="whatsapp.instance.create",
+                                details=f"instance_id={instance.get('id')} label={label}",
+                            )
+                        )
+                        db.session.commit()
+                        message = f"Nomor WhatsApp '{label}' berhasil didaftarkan. Scan QR di bawah untuk menghubungkan."
+                    else:
+                        error = f"Gagal mendaftarkan nomor WhatsApp: {status}"
+            elif action == "wa_number_delete":
+                instance_id = request.form.get("instance_id", "").strip()
+                if not instance_id:
+                    error = "instance_id wajib diisi"
+                else:
+                    ok, status = delete_wa_instance(instance_id)
+                    if ok:
+                        db.session.add(
+                            AuditLog(
+                                actor_user_id=current_user_id(),
+                                action="whatsapp.instance.delete",
+                                details=f"instance_id={instance_id}",
+                            )
+                        )
+                        db.session.commit()
+                        message = "Nomor WhatsApp berhasil dihapus"
+                    else:
+                        error = f"Gagal menghapus nomor WhatsApp: {status}"
 
         settings_map = get_many(setting_keys)
-        if not settings_map.get("wa_mode"):
-            settings_map["wa_mode"] = get_setting("wa_mode", app.config.get("WHATSAPP_MODE", "mock"))
         if not settings_map.get("booking_done_template"):
             settings_map["booking_done_template"] = get_setting(
                 "booking_done_template", DEFAULT_BOOKING_DONE_TEMPLATE
@@ -1600,6 +2138,8 @@ def create_app() -> Flask:
             settings_map["review_request_template"] = get_setting(
                 "review_request_template", DEFAULT_REVIEW_REQUEST_TEMPLATE
             )
+        if not settings_map.get("daily_capacity"):
+            settings_map["daily_capacity"] = get_setting("daily_capacity", "4")
         if not settings_map.get("google_maps_business_url"):
             settings_map["google_maps_business_url"] = get_setting("google_maps_business_url", "")
 
@@ -1617,12 +2157,29 @@ def create_app() -> Flask:
         bridge_base = profile.base_url if profile else ""
         bridge_detected = bool(bridge_base)
         bridge_qr_path = profile.qr_path if profile else "/qr"
-        qr_url = f"{bridge_base}{bridge_qr_path}" if (bridge_base and profile and profile.has_qr) else ""
+        # Browser-facing: relative path through nginx's /wa-bridge/ proxy.
+        # bridge_base (e.g. http://wa-bridge:3000) is a Docker-internal
+        # hostname the user's browser can't resolve, so it's never embedded
+        # directly in HTML sent to the browser.
+        qr_url = f"{request.host_url.rstrip('/')}/wa-bridge{bridge_qr_path}" if (bridge_base and profile and profile.has_qr) else ""
         qr_embed_url = ""
         if qr_url:
             ts = int(datetime.utcnow().timestamp())
-            sep = "&" if "?" in qr_url else "?"
-            qr_embed_url = f"{qr_url}{sep}t={ts}"
+            qr_embed_url = f"/wa-bridge{bridge_qr_path}?t={ts}"
+
+        wa_instances = []
+        if bridge_detected:
+            ok_instances, _, wa_instances_raw = list_wa_instances()
+            if ok_instances:
+                for inst in wa_instances_raw:
+                    item = dict(inst)
+                    inst_id = str(inst.get("id") or "")
+                    item["qr_embed_url"] = (
+                        wa_instance_qr_embed_url(inst_id)
+                        if (inst_id and inst.get("has_qr"))
+                        else ""
+                    )
+                    wa_instances.append(item)
 
         return render_template(
             "settings.html",
@@ -1639,6 +2196,8 @@ def create_app() -> Flask:
             bridge_detected_from=profile.detected_from if profile else "",
             qr_url=qr_url,
             qr_embed_url=qr_embed_url,
+            wa_instances=wa_instances,
+            partial=wants_partial(),
         )
 
     @app.post("/api/whatsapp/inbound")
@@ -1713,4 +2272,7 @@ app = create_app()
 
 if __name__ == "__main__":  # pragma: no cover
     port = int(os.getenv("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=True, threaded=True)
+    # debug=True exposes the Werkzeug interactive debugger (remote code execution
+    # risk) - default it off since host="0.0.0.0" makes this reachable on the network.
+    debug = os.getenv("FLASK_DEBUG", "false").strip().lower() in ("1", "true", "yes")
+    app.run(host="0.0.0.0", port=port, debug=debug, threaded=True)

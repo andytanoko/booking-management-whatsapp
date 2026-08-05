@@ -1,0 +1,53 @@
+{% extends 'partial.html' if partial else 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block content %}
+<section class="card">
+  <div class="card-header">{{ icon('list') }}<h2>Riwayat Booking</h2></div>
+  <p>Menampilkan booking yang sudah selesai atau dibatalkan.</p>
+</section>
+
+{% if bookings %}
+<section class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Pelanggan</th>
+          <th>Layanan</th>
+          <th>Jadwal</th>
+          <th>Status</th>
+          <th>Maintenance Terakhir</th>
+          <th>Layanan Maintenance</th>
+          <th>Jumlah Maintenance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in bookings %}
+        {% set stat = maintenance_stats.get(item.id) %}
+        <tr>
+          <td>{{ item.id }}</td>
+          <td>{{ item.customer.name }}<br /><small>{{ item.customer.phone }}</small></td>
+          <td>{{ item.service_type.name }}</td>
+          <td>{{ item.scheduled_start.strftime('%d-%m-%Y %H:%M') }}</td>
+          <td>
+            <span class="status-badge status-{{ item.status }}">
+              {{ statuses.get(item.status, item.status) }}
+            </span>
+          </td>
+          <td>{{ stat.last_date.strftime('%d-%m-%Y') if stat else '-' }}</td>
+          <td>{{ stat.last_service if stat else '-' }}</td>
+          <td>{{ stat.count if stat else '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
+<section class="card">
+  <div class="alert info">Belum ada booking yang selesai atau dibatalkan.</div>
+</section>
+{% endif %}
+{% endblock %}
+

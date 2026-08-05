@@ -1,7 +1,8 @@
-{% extends 'base.html' %}
+{% extends 'partial.html' if partial else 'base.html' %}
+{% from '_icons.html' import icon %}
 {% block content %}
 <section class="card">
-  <h2>Edit Booking #{{ booking.id }}</h2>
+  <div class="card-header">{{ icon('edit') }}<h2>Edit Booking #{{ booking.id }}</h2></div>
   {% if message %}<div class="alert success">{{ message }}</div>{% endif %}
   {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
   
@@ -17,7 +18,7 @@
     </label>
     
     <label>Kendaraan (Merk & Type)
-      <input type="text" name="vehicle_type" placeholder="Contoh: Toyota Rush GR" value="{{ booking.vehicle_type or '' }}" />
+      <input type="text" name="vehicle_type" placeholder="Contoh: Toyota Rush GR" value="{{ booking.vehicle_type or '' }}" required />
     </label>
     
     <label>Nomor Polisi
@@ -42,22 +43,22 @@
     <small style="grid-column: span 2; color: #666;">Sistem otomatis akan menerjemahkan paket ke layanan yang sesuai. Jika tidak cocok, pilih dari dropdown di atas.</small>
     
     <label>Jadwal Mulai
-      <input type="datetime-local" name="scheduled_start" value="{{ booking.scheduled_start.strftime('%Y-%m-%dT%H:%M') }}" required />
+      <input type="date" name="scheduled_start" value="{{ booking.scheduled_start.strftime('%Y-%m-%d') }}" required />
     </label>
     
     <label>Catatan
       <input type="text" name="notes" value="{{ booking.notes or '' }}" />
     </label>
     
-    <div style="grid-column: span 2; display: flex; gap: 10px;">
-      <button type="submit" class="btn-primary">💾 Simpan Perubahan</button>
-      <a href="{{ url_for('bookings') }}" class="btn-secondary" style="text-decoration: none; display: inline-block; padding: 8px 16px; background: #999; color: white; border: none; border-radius: 4px; cursor: pointer;">❌ Batal</a>
+    <div class="form-actions full-col">
+      <button type="submit" class="btn-primary">{{ icon('save') }} Simpan Perubahan</button>
+      <a href="{{ url_for('bookings') }}" class="btn-secondary">{{ icon('x-circle') }} Batal</a>
     </div>
   </form>
 </section>
 
 <section class="card">
-  <h2>Informasi Booking</h2>
+  <div class="card-header">{{ icon('info') }}<h2>Informasi Booking</h2></div>
   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
     <div>
       <p><strong>ID:</strong> {{ booking.id }}</p>

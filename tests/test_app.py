@@ -33,7 +33,7 @@ class TestAuthEndpoints:
     def test_login_success(self, client, user):
         """Test successful login."""
         response = client.post("/login", data={
-            "username": "admin",
+            "username": user.username,
             "password": "password123"
         }, follow_redirects=True)
         

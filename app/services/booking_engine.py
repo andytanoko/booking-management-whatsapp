@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from app.models import Booking, ServiceType
+from app.services.settings_store import get_setting
 
 
 OPERATING_START_HOUR = 9
@@ -24,14 +25,42 @@ def is_within_operating_hours(start_time: datetime, end_time: datetime) -> bool:
 
 
 def has_conflict(start_time: datetime, end_time: datetime, exclude_booking_id: int = None) -> bool:
-    """Check if a time slot has conflict with existing bookings.
-    
-    Only checks active bookings (not reschedule, cancel, or batal).
+    """Determine if a proposed booking conflicts with existing bookings.
+
+    Behavior changed: the workshop can handle up to `daily_capacity` bookings
+    per calendar day (default 4). If `daily_capacity` is set to a value > 0,
+    we treat the day as full when the number of active bookings on that date
+    is greater-or-equal to the capacity. When `daily_capacity` is 0 or not a
+    positive integer, fall back to the legacy time-overlap check.
+
     Optionally excludes a specific booking (useful for rescheduling).
     """
+    # Configurable daily capacity (string from settings); default to 4
+    try:
+        capacity = int(get_setting("daily_capacity", "4") or 4)
+    except Exception:
+        capacity = 4
+
+    # Active statuses to consider when counting bookings
+    base_query = Booking.query.filter(~Booking.status.in_("reschedule, cancel, selesai".split(", ") ))
+
+    if capacity and capacity > 0:
+        # Count bookings scheduled for the same calendar day as start_time
+        day_start = datetime(start_time.year, start_time.month, start_time.day)
+        day_end = day_start + timedelta(days=1)
+        query = (
+            base_query
+            .filter(Booking.scheduled_start >= day_start)
+            .filter(Booking.scheduled_start < day_end)
+        )
+        if exclude_booking_id:
+            query = query.filter(Booking.id != exclude_booking_id)
+        count = query.count()
+        return count >= capacity
+
+    # Fallback: legacy overlap check
     query = (
-        Booking.query
-        .filter(~Booking.status.in_(["reschedule", "cancel", "batal", "selesai"]))
+        base_query
         .filter(Booking.scheduled_start < end_time)
         .filter(Booking.scheduled_end > start_time)
     )

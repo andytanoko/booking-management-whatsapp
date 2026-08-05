@@ -1,22 +1,23 @@
-{% extends 'base.html' %}
+{% extends 'partial.html' if partial else 'base.html' %}
+{% from '_icons.html' import icon %}
 {% block content %}
 <section class="cards-row">
   <article class="card stat">
-    <h3>Booking Hari Ini</h3>
+    <div class="stat-header">{{ icon('calendar') }}<h3>Booking Hari Ini</h3></div>
     <p>{{ bookings_today }}</p>
   </article>
   <article class="card stat">
-    <h3>Booking Pending</h3>
+    <div class="stat-header">{{ icon('clock') }}<h3>Booking Pending</h3></div>
     <p>{{ pending }}</p>
   </article>
   <article class="card stat">
-    <h3>Total Pelanggan</h3>
+    <div class="stat-header">{{ icon('users') }}<h3>Total Pelanggan</h3></div>
     <p>{{ customers }}</p>
   </article>
 </section>
 
 <section class="card">
-  <h2>Status Sistem</h2>
+  <div class="card-header">{{ icon('activity') }}<h2>Status Sistem</h2></div>
   <ul>
     <li>Jam Operasional: 09:00 - 18:00</li>
     <li>Layanan: PPF, Coating, Polishing, Interior Detailing</li>

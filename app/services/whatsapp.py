@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from urllib import error, request
 from urllib.parse import urlparse
@@ -27,7 +28,7 @@ class BridgeProfile:
     detected_from: str
 
 
-def _request_json(endpoint: str, timeout: float = 1.5) -> dict | None:
+def _request_json(endpoint: str, timeout: float = 5.0) -> dict | None:
     req = request.Request(endpoint, method="GET")
     try:
         with request.urlopen(req, timeout=timeout) as response:
@@ -38,6 +39,12 @@ def _request_json(endpoint: str, timeout: float = 1.5) -> dict | None:
             return data if isinstance(data, dict) else None
     except Exception:
         return None
+
+
+def normalize_whatsapp_number(phone: str) -> str:
+    """Normalize a WhatsApp phone identifier to digits only."""
+    digits = re.sub(r"\D", "", str(phone or ""))
+    return digits if 8 <= len(digits) <= 15 else ""
 
 
 def _probe_bridge(base_url: str, qr_path: str) -> bool:
@@ -51,7 +58,7 @@ def _probe_bridge(base_url: str, qr_path: str) -> bool:
     for endpoint in candidates:
         req = request.Request(endpoint, method="GET")
         try:
-            with request.urlopen(req, timeout=1.5) as response:
+            with request.urlopen(req, timeout=3.0) as response:
                 if 200 <= response.status < 500:
                     return True
         except Exception:
@@ -134,7 +141,7 @@ def discover_bridge_profile(extra_candidates: list[str] | None = None) -> Bridge
         endpoint = f"{base_url.rstrip('/')}{path}"
         req = request.Request(endpoint, method="GET")
         try:
-            with request.urlopen(req, timeout=1.5) as response:
+            with request.urlopen(req, timeout=3.0) as response:
                 if 200 <= response.status < 500:
                     qr_path = path
                     break
@@ -217,14 +224,31 @@ class BridgeWhatsAppGateway(WhatsAppGateway):
         if not send_path.startswith("/"):
             send_path = f"/{send_path}"
 
+        normalized_phone = normalize_whatsapp_number(phone)
         payload = {
-            "phone": phone,
+            "phone": normalized_phone or phone,
             "text": text,
         }
         if chat_id:
-            payload["chat_id"] = chat_id
+            if chat_id.endswith("@lid") and normalized_phone:
+                current_app.logger.warning(
+                    "Bridge WhatsApp send skipping @lid chat_id because numeric phone is available: phone=%s chat_id=%s",
+                    normalized_phone,
+                    chat_id,
+                )
+                chat_id = None
+            else:
+                payload["chat_id"] = chat_id
         if instance_id:
             payload["instance_id"] = instance_id
+
+        current_app.logger.info(
+            "Bridge WhatsApp send payload phone=%s chat_id=%s instance_id=%s text=%s",
+            normalized_phone or phone,
+            chat_id,
+            instance_id,
+            text[:64],
+        )
 
         raw = json.dumps(payload).encode("utf-8")
         endpoint = f"{base_url}{send_path}"
@@ -236,10 +260,40 @@ class BridgeWhatsAppGateway(WhatsAppGateway):
 
         try:
             with request.urlopen(req, timeout=10) as response:
+                body_text = response.read().decode("utf-8", errors="ignore") or ""
+                current_app.logger.debug(
+                    "Bridge WhatsApp send response status=%s body=%s",
+                    response.status,
+                    body_text,
+                )
+
+                status = f"bridge-{response.status}"
                 if 200 <= response.status < 300:
-                    return True, f"bridge-{response.status}"
+                    if body_text:
+                        try:
+                            body = json.loads(body_text)
+                            status = str(body.get("status") or status)
+                        except json.JSONDecodeError:
+                            pass
+                    return True, status
+
+                if body_text:
+                    try:
+                        body = json.loads(body_text)
+                        return False, str(body.get("error") or body.get("status") or status)
+                    except json.JSONDecodeError:
+                        pass
                 return False, f"bridge-{response.status}"
         except error.HTTPError as exc:
+            try:
+                body_text = exc.read().decode("utf-8", errors="ignore") or ""
+                current_app.logger.error(
+                    "Bridge WhatsApp HTTPError status=%s body=%s",
+                    exc.code,
+                    body_text,
+                )
+            except Exception:
+                current_app.logger.exception("Failed reading HTTPError body")
             return False, f"bridge-http-{exc.code}"
         except Exception as exc:
             current_app.logger.exception("Bridge WhatsApp send failed: %s", exc)
@@ -247,12 +301,50 @@ class BridgeWhatsAppGateway(WhatsAppGateway):
 
 
 def get_gateway() -> WhatsAppGateway:
-    mode = get_setting("wa_mode", current_app.config.get("WHATSAPP_MODE", "mock")).strip().lower()
-    if mode == "bridge":
-        return BridgeWhatsAppGateway()
-    if mode == "mock":
-        return MockWhatsAppGateway()
-    return MockWhatsAppGateway()
+    return BridgeWhatsAppGateway()
+
+
+def check_whatsapp_number_registered(phone: str) -> tuple[bool | None, str]:
+    """Ask the bridge whether a phone number is a real, active WhatsApp account.
+
+    Returns (True, "ok") if registered, (False, reason) if the bridge
+    confirmed the number does NOT exist on WhatsApp, or (None, reason) if the
+    check was inconclusive (bridge unreachable/not connected) - callers
+    should treat None as "unknown" and not hard-block on it.
+    """
+    normalized = normalize_whatsapp_number(phone)
+    if not normalized:
+        return False, "invalid-format"
+
+    profile = discover_bridge_profile()
+    if not profile or not profile.base_url:
+        return None, "bridge-not-found"
+
+    raw = json.dumps({"phone": normalized, "instance_id": profile.instance_id}).encode("utf-8")
+    endpoint = f"{profile.base_url.rstrip('/')}/check-number"
+    req = request.Request(endpoint, data=raw, method="POST")
+    req.add_header("Content-Type", "application/json")
+    if profile.api_key:
+        req.add_header("Authorization", f"Bearer {profile.api_key}")
+        req.add_header("X-API-Key", profile.api_key)
+
+    try:
+        with request.urlopen(req, timeout=10) as response:
+            body = json.loads(response.read().decode("utf-8", errors="ignore") or "{}")
+            if not body.get("ok"):
+                return None, str(body.get("error") or "check-failed")
+            return bool(body.get("registered")), "ok"
+    except error.HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode("utf-8", errors="ignore") or "{}")
+            err_msg = str(body.get("error") or f"bridge-http-{exc.code}")
+        except Exception:
+            err_msg = f"bridge-http-{exc.code}"
+        # wa_not_connected (409) or any other bridge-side failure is
+        # inconclusive, not a confirmed "number doesn't exist" - don't block.
+        return None, err_msg
+    except Exception:
+        return None, "bridge-error"
 
 
 def fetch_whatsapp_contacts(saved_only: bool = True) -> tuple[bool, str, list[dict]]:
@@ -278,6 +370,75 @@ def fetch_whatsapp_contacts(saved_only: bool = True) -> tuple[bool, str, list[di
     if not isinstance(contacts, list):
         contacts = []
     return True, "ok", contacts
+
+
+def list_wa_instances() -> tuple[bool, str, list[dict]]:
+    """List every WhatsApp number/session registered on the bridge."""
+    base_url = discover_bridge_base_url()
+    if not base_url:
+        return False, "bridge-not-found", []
+
+    data = _request_json(f"{base_url.rstrip('/')}/instances", timeout=5.0)
+    if not data or not data.get("ok"):
+        return False, str((data or {}).get("error") or "instances-unavailable"), []
+
+    instances = data.get("instances")
+    if not isinstance(instances, list):
+        instances = []
+    return True, "ok", instances
+
+
+def create_wa_instance(label: str) -> tuple[bool, str, dict | None]:
+    """Register a new WhatsApp number on the bridge; a QR code is generated for it."""
+    base_url = discover_bridge_base_url()
+    if not base_url:
+        return False, "bridge-not-found", None
+
+    raw = json.dumps({"label": label}).encode("utf-8")
+    req = request.Request(f"{base_url.rstrip('/')}/instances", data=raw, method="POST")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with request.urlopen(req, timeout=10) as response:
+            body = json.loads(response.read().decode("utf-8", errors="ignore") or "{}")
+            if body.get("ok"):
+                return True, "ok", body.get("instance")
+            return False, str(body.get("error") or "create-failed"), None
+    except error.HTTPError as exc:
+        return False, f"bridge-http-{exc.code}", None
+    except Exception:
+        return False, "bridge-error", None
+
+
+def delete_wa_instance(instance_id: str) -> tuple[bool, str]:
+    """Log out and remove a previously registered WhatsApp number."""
+    base_url = discover_bridge_base_url()
+    if not base_url:
+        return False, "bridge-not-found"
+
+    req = request.Request(f"{base_url.rstrip('/')}/instances/{instance_id}", method="DELETE")
+    try:
+        with request.urlopen(req, timeout=10) as response:
+            body = json.loads(response.read().decode("utf-8", errors="ignore") or "{}")
+            if body.get("ok"):
+                return True, "ok"
+            return False, str(body.get("error") or "delete-failed")
+    except error.HTTPError as exc:
+        return False, f"bridge-http-{exc.code}"
+    except Exception:
+        return False, "bridge-error"
+
+
+def wa_instance_qr_embed_url(instance_id: str) -> str:
+    """Build a cache-busted, browser-facing QR image URL.
+
+    Routed through nginx's /wa-bridge/ prefix rather than the internal
+    bridge_base (e.g. http://wa-bridge:3000), which is a Docker-network-only
+    hostname the user's browser cannot resolve.
+    """
+    ts = int(datetime.utcnow().timestamp())
+    return f"/wa-bridge/instances/{instance_id}/qr?t={ts}"
+
+
 
 
 def log_inbound_message(
