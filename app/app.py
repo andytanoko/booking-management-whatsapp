@@ -1872,7 +1872,7 @@ def create_app() -> Flask:
         # the text before it's actually sent.
         reminder_template = get_setting("maintenance_reminder_template", DEFAULT_MAINTENANCE_REMINDER_TEMPLATE)
         review_template = get_setting("review_request_template", DEFAULT_REVIEW_REQUEST_TEMPLATE)
-        review_link = get_setting("google_maps_business_url", "https://maps.google.com")
+        review_link = get_setting("google_maps_business_url", "https://maps.app.goo.gl/sSL6Hmv5dn8aqKxZ8")
         drafts = {}
         for reminder in reminders:
             drafts[reminder.id] = {
