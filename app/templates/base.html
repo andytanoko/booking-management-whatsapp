@@ -25,7 +25,7 @@
           <a href="{{ url_for('maintenance') }}" data-title="Maintenance"><span class="nav-icon">{{ icon('wrench') }}</span> Maintenance</a>
           <a href="{{ url_for('customers') }}" data-title="Kontak"><span class="nav-icon">{{ icon('users') }}</span> Kontak</a>
           <a href="{{ url_for('inbox') }}" data-title="Inbox WA"><span class="nav-icon">{{ icon('whatsapp') }}</span> Inbox WA</a>
-          <a href="{{ url_for('whatsapp_followups') }}" data-title="Follow-up WA"><span class="nav-icon">{{ icon('alert-triangle') }}</span> Follow-up WA</a>
+          <a href="{{ url_for('whatsapp_followups') }}" data-title="Incomplete Booking"><span class="nav-icon">{{ icon('alert-triangle') }}</span> Incomplete Booking</a>
           {% endif %}
           {% if current_role == 'admin' %}
           <a href="{{ url_for('users') }}" data-title="Users"><span class="nav-icon">{{ icon('key') }}</span> Users</a>
