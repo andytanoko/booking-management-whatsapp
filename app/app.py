@@ -1415,13 +1415,85 @@ def create_app() -> Flask:
     @require_roles("admin")
     def users():
         message = None
+        error = None
         if request.method == "POST":
-            username = request.form.get("username", "").strip()
-            password = request.form.get("password", "").strip()
-            role = request.form.get("role", "").strip()
-            if username and password and role in {"admin", "cs", "technician"}:
-                existing = User.query.filter_by(username=username).first()
-                if not existing:
+            action = request.form.get("action", "create").strip()
+
+            if action == "delete":
+                user_id = int(request.form.get("user_id", "0") or 0)
+                user = User.query.get(user_id)
+                if not user:
+                    error = "User tidak ditemukan"
+                elif user.id == current_user_id():
+                    error = "Tidak bisa menghapus akun sendiri"
+                else:
+                    db.session.add(
+                        AuditLog(
+                            actor_user_id=current_user_id(),
+                            action="user.delete",
+                            details=f"username={user.username} role={user.role}",
+                        )
+                    )
+                    db.session.delete(user)
+                    db.session.commit()
+                    message = f"User '{user.username}' berhasil dihapus"
+
+            elif action == "toggle_active":
+                user_id = int(request.form.get("user_id", "0") or 0)
+                user = User.query.get(user_id)
+                if not user:
+                    error = "User tidak ditemukan"
+                elif user.id == current_user_id():
+                    error = "Tidak bisa menonaktifkan akun sendiri"
+                else:
+                    user.active = not user.active
+                    db.session.add(
+                        AuditLog(
+                            actor_user_id=current_user_id(),
+                            action="user.toggle_active",
+                            details=f"username={user.username} active={user.active}",
+                        )
+                    )
+                    db.session.commit()
+                    status_label = "diaktifkan" if user.active else "dinonaktifkan"
+                    message = f"User '{user.username}' berhasil {status_label}"
+
+            elif action == "update":
+                user_id = int(request.form.get("user_id", "0") or 0)
+                username = request.form.get("username", "").strip()
+                password = request.form.get("password", "").strip()
+                role = request.form.get("role", "").strip()
+                user = User.query.get(user_id)
+                if not user:
+                    error = "User tidak ditemukan"
+                elif not username or role not in {"admin", "cs", "technician"}:
+                    error = "Username dan role wajib diisi"
+                elif User.query.filter(User.username == username, User.id != user_id).first():
+                    error = "Username sudah digunakan oleh user lain"
+                else:
+                    user.username = username
+                    user.role = role
+                    if password:
+                        user.set_password(password)
+                    db.session.add(
+                        AuditLog(
+                            actor_user_id=current_user_id(),
+                            action="user.update",
+                            details=f"user_id={user_id} username={username} role={role}",
+                        )
+                    )
+                    db.session.commit()
+                    message = f"User '{username}' berhasil diperbarui"
+
+            else:  # create
+                username = request.form.get("username", "").strip()
+                password = request.form.get("password", "").strip()
+                role = request.form.get("role", "").strip()
+                if not username or not password or role not in {"admin", "cs", "technician"}:
+                    error = "Username, password, dan role wajib diisi"
+                elif User.query.filter_by(username=username).first():
+                    error = "Username sudah digunakan"
+                else:
                     user = User(username=username, role=role)
                     user.set_password(password)
                     db.session.add(user)
@@ -1434,8 +1506,10 @@ def create_app() -> Flask:
                     )
                     db.session.commit()
                     message = "User berhasil ditambahkan"
+
         all_users = User.query.order_by(User.created_at.desc()).all()
-        return render_template("users.html", users=all_users, message=message, partial=wants_partial())
+        return render_template("users.html", users=all_users, message=message, error=error,
+                               current_uid=current_user_id(), partial=wants_partial())
 
     @app.route("/inbox")
     @require_roles("admin", "cs")

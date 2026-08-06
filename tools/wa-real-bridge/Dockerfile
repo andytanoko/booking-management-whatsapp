@@ -17,6 +17,7 @@ RUN mkdir -p /usr/local/share/ca-certificates/extra/ \
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV HOME=/home/pptruser
 
 # Modern Chromium ignores the NSS/platform trust store by default in favor of
 # its own built-in Chrome Root Store, so the imported corporate CA above would

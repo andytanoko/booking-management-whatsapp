@@ -9,4 +9,9 @@ mkdir -p /usr/src/app/.wwebjs_auth /usr/src/app/.wwebjs_cache
 touch /usr/src/app/instances.json
 chown -R pptruser:pptruser /usr/src/app/.wwebjs_auth /usr/src/app/.wwebjs_cache /usr/src/app/instances.json
 
+# Ensure puppeteer/cosmiconfig searches under pptruser's home, not /root.
+export HOME=/home/pptruser
+mkdir -p /home/pptruser/.config/puppeteer
+chown -R pptruser:pptruser /home/pptruser/.config
+
 exec setpriv --reuid=pptruser --regid=pptruser --init-groups "$@"
