@@ -244,7 +244,13 @@ function createInstance({ id, clientId, label }) {
     }
   };
 
-  const puppeteerArgs = ['--no-sandbox', '--disable-setuid-sandbox'];
+  const puppeteerArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',  // containers have 2MB /dev/shm by default — Chrome stalls without this
+    '--disable-gpu',
+    '--no-first-run',
+  ];
   // Opt-in only: for corporate/network TLS-intercepting proxies (e.g. Netskope)
   // where the intercepting CA can't be made to work with Chromium's built-in
   // cert verifier. Never enable this against the open internet.
@@ -256,7 +262,8 @@ function createInstance({ id, clientId, label }) {
     authStrategy: new LocalAuth({ clientId }),
     puppeteer: {
       headless: true,
-      args: puppeteerArgs
+      args: puppeteerArgs,
+      protocolTimeout: 120000,
     }
   });
   inst.client = client;
