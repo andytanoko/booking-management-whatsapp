@@ -68,6 +68,9 @@ ARGS=(up)
 # Needed on machines behind a corporate TLS-intercepting proxy (e.g. Netskope),
 # where Chromium in wa-bridge otherwise fails QR generation with ERR_CERT_AUTHORITY_INVALID.
 export WA_BRIDGE_IGNORE_CERT_ERRORS=true
+# Required on Podman: ensures .dockerignore is applied before stat-ing build context files.
+export DOCKER_BUILDKIT=1
+export COMPOSE_DOCKER_CLI_BUILD=1
 
 echo "Starting stack: db, web, wa-bridge ..."
 "${COMPOSE[@]}" "${ARGS[@]}"
