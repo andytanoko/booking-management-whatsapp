@@ -1,7 +1,9 @@
 services:
   db:
     image: postgres:16-alpine
-    restart: unless-stopped
+    restart: always
+    tty: true
+    stdin_open: true
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-booking}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-booking}
@@ -25,13 +27,17 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    restart: unless-stopped
+    restart: always
+    tty: true
+    stdin_open: true
     volumes:
       - ./:/app
 
   wa-bridge:
     build: ./tools/wa-real-bridge
-    restart: unless-stopped
+    restart: always
+    tty: true
+    stdin_open: true
     expose:
       - "3000"
     environment:
@@ -53,7 +59,9 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
-    restart: unless-stopped
+    restart: always
+    tty: true
+    stdin_open: true
     ports:
       - "8080:80"
     volumes:
