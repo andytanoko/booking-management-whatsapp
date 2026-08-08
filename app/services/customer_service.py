@@ -3,6 +3,9 @@ Customer service module - handles all customer-related operations.
 Extracted from app.py to improve testability.
 """
 import re
+
+
+
 from typing import Optional
 from app.models import Customer, db
 
@@ -73,6 +76,30 @@ class CustomerService:
             # Only create new customer with a real identifier
             if not real_number and not lid:
                 return None
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
                 
             customer = Customer(
                 name=contact_name or f"WhatsApp {real_number[-4:] if real_number else 'Customer'}",
@@ -136,17 +163,32 @@ class CustomerService:
         if not normalized:
             return None
         
-        customer = Customer.query.filter_by(phone=normalized).first()
-        if not customer:
-            customer = Customer(
-                name=f"WhatsApp {normalized[-4:]}",
-                phone=normalized,
-                notes="Otomatis dari WhatsApp"
-            )
-            db.session.add(customer)
-            db.session.commit()
-        
-        return customer
+
+
+
+
+
+
+
+
+
+
+
+        try:
+            customer = Customer.query.filter_by(phone=normalized).first()
+            if not customer:
+                customer = Customer(
+                    name=f"WhatsApp {normalized[-4:]}",
+                    phone=normalized,
+                    notes="Otomatis dari WhatsApp"
+                )
+                db.session.add(customer)
+                db.session.commit()
+            return customer
+        except Exception as e:
+            current_app.logger.error(f"Error in get_or_create_by_phone: {e}")
+            db.session.rollback()
+            return None
 
     @staticmethod
     def update_vehicle_info(customer: Customer, vehicle_info: str) -> Customer:
@@ -228,3 +270,29 @@ class CustomerService:
             Number of customers
         """
         return Customer.query.count()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

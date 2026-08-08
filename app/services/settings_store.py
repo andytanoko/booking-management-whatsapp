@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+
+
 from app.models import AppSetting, db
 
 
@@ -19,7 +21,15 @@ def set_setting(key: str, value: str) -> None:
         item.value = value
 
 
-def get_many(keys: list[str]) -> dict[str, str]:
-    rows = AppSetting.query.filter(AppSetting.key.in_(keys)).all()
-    row_map = {row.key: (row.value or "") for row in rows}
-    return {key: row_map.get(key, "") for key in keys}
+
+
+
+
+def get_many(keys: List[str]) -> Dict[str, str]:
+    try:
+        rows = AppSetting.query.filter(AppSetting.key.in_(keys)).all()
+        row_map = {row.key: (row.value or "") for row in rows}
+        return {key: row_map.get(key, "") for key in keys}
+    except Exception as e:
+        current_app.logger.error(f"Error getting multiple settings: {e}")
+        return {key: "" for key in keys}

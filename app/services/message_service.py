@@ -4,7 +4,8 @@ Extracted from app.py to improve testability.
 """
 import re
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+from flask import current_app
 from app.models import WhatsAppMessage, db
 
 

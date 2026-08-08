@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from flask import current_app
 
 from app.models import Booking, ServiceType
 from app.services.settings_store import get_setting
@@ -15,13 +16,17 @@ def compute_booking_end(service: ServiceType, start_time: datetime) -> datetime:
 
 
 def is_within_operating_hours(start_time: datetime, end_time: datetime) -> bool:
-    if start_time.date() != end_time.date():
+    try:
+        if start_time.date() != end_time.date():
+            return False
+        open_minutes = OPERATING_START_HOUR * 60
+        close_minutes = OPERATING_END_HOUR * 60
+        start_minutes = start_time.hour * 60 + start_time.minute
+        end_minutes = end_time.hour * 60 + end_time.minute
+        return open_minutes <= start_minutes and end_minutes <= close_minutes
+    except Exception as e:
+        current_app.logger.error(f"Error in is_within_operating_hours: {e}")
         return False
-    open_minutes = OPERATING_START_HOUR * 60
-    close_minutes = OPERATING_END_HOUR * 60
-    start_minutes = start_time.hour * 60 + start_time.minute
-    end_minutes = end_time.hour * 60 + end_time.minute
-    return open_minutes <= start_minutes and end_minutes <= close_minutes
 
 
 def has_conflict(start_time: datetime, end_time: datetime, exclude_booking_id: int = None) -> bool:

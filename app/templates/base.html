@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{{ title or "Detailing Ops" }}</title>
+
+    <title>{{ title or "Booking Management" }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   </head>
   <body>
@@ -13,7 +14,8 @@
       <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-label="Menu">{{ icon('menu') }}</button>
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
-          <h1>Detailing Ops</h1>
+
+          <h1>Booking Management</h1>
           <p>Booking + WhatsApp</p>
         </div>
         <nav class="sidebar-nav">
@@ -44,3 +46,4 @@
     {% endif %}
   </body>
 </html>
+
