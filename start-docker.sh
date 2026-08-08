@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #
 # start-docker.sh — Build and start the full Docker Compose stack:
 # Postgres (db), the Flask app via gunicorn (web), and the WhatsApp
@@ -10,6 +10,8 @@
 #   ./start-docker.sh --no-build   # skip rebuilding images
 #
 set -euo pipefail
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 # Resolve the project root (directory of this script) so it works from anywhere.
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,11 +41,13 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 1
 fi
 
-# 2. Pick whichever compose CLI is available (plugin vs standalone binary).
-if docker compose version >/dev/null 2>&1; then
-    COMPOSE=(docker compose)
-elif command -v docker-compose >/dev/null 2>&1; then
+# 2. Pick whichever compose CLI is available (prefer standalone docker-compose
+# on hosts where the docker compose plugin reports a version but does not
+# actually support compose subcommands correctly).
+if command -v docker-compose >/dev/null 2>&1; then
     COMPOSE=(docker-compose)
+elif docker compose version >/dev/null 2>&1; then
+    COMPOSE=(docker compose)
 else
     echo "Error: neither 'docker compose' nor 'docker-compose' is available." >&2
     exit 1

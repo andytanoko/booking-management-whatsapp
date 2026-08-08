@@ -15,17 +15,36 @@ from app.models import WhatsAppMessage, db
 from app.services.settings_store import get_setting
 
 
-@dataclass
-class BridgeProfile:
-    base_url: str
-    send_path: str
-    qr_path: str
-    api_key: str
-    instance_id: str
-    auth_required: bool
-    connected: bool
-    has_qr: bool
-    detected_from: str
+class BridgeProfile(dict):
+    def __init__(
+        self,
+        base_url: str,
+        send_path: str,
+        qr_path: str,
+        api_key: str,
+        instance_id: str,
+        auth_required: bool,
+        connected: bool,
+        has_qr: bool,
+        detected_from: str,
+    ):
+        super().__init__(
+            base_url=base_url,
+            send_path=send_path,
+            qr_path=qr_path,
+            api_key=api_key,
+            instance_id=instance_id,
+            auth_required=auth_required,
+            connected=connected,
+            has_qr=has_qr,
+            detected_from=detected_from,
+        )
+
+    def __getattr__(self, name: str):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
 
 
 def _request_json(endpoint: str, timeout: float = 5.0) -> dict | None:
@@ -428,7 +447,7 @@ def delete_wa_instance(instance_id: str) -> tuple[bool, str]:
         return False, "bridge-error"
 
 
-def wa_instance_qr_embed_url(instance_id: str) -> str:
+def wa_instance_qr_embed_url(instance_id: str, maybe_instance_id: str | None = None) -> str:
     """Build a cache-busted, browser-facing QR image URL.
 
     Routed through nginx's /wa-bridge/ prefix rather than the internal
@@ -436,6 +455,8 @@ def wa_instance_qr_embed_url(instance_id: str) -> str:
     hostname the user's browser cannot resolve.
     """
     ts = int(datetime.utcnow().timestamp())
+    if maybe_instance_id is not None:
+        return f"{instance_id.rstrip('/')}/instances/{maybe_instance_id}/qr?t={ts}"
     return f"/wa-bridge/instances/{instance_id}/qr?t={ts}"
 
 

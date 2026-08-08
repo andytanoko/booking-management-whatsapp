@@ -9,7 +9,7 @@
   </head>
   <body>
     {% from '_icons.html' import icon %}
-    {% if current_user_id %}
+    {% if current_user.is_authenticated %}
     <div class="app-shell">
       <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-label="Menu">{{ icon('menu') }}</button>
       <aside class="sidebar" id="sidebar">
@@ -20,21 +20,21 @@
         </div>
         <nav class="sidebar-nav">
           <a href="{{ url_for('dashboard') }}" data-title="Dashboard"><span class="nav-icon">{{ icon('grid') }}</span> Dashboard</a>
-          {% if current_role in ['admin', 'cs'] %}
-          <a href="{{ url_for('bookings') }}" data-title="Bookings"><span class="nav-icon">{{ icon('calendar') }}</span> Bookings</a>
+          {% if current_user.role in ['admin', 'cs'] %}
+          <a href="{{ url_for('bookings.list_bookings') }}" data-title="Bookings"><span class="nav-icon">{{ icon('calendar') }}</span> Bookings</a>
           <a href="{{ url_for('whatsapp_followups') }}" data-title="Incomplete Booking"><span class="nav-icon">{{ icon('alert-triangle') }}</span> Incomplete Booking</a>
           <a href="{{ url_for('history') }}" data-title="Riwayat"><span class="nav-icon">{{ icon('list') }}</span> Riwayat</a>
           <a href="{{ url_for('reschedule') }}" data-title="Reschedule"><span class="nav-icon">{{ icon('repeat') }}</span> Reschedule</a>
-          <a href="{{ url_for('maintenance') }}" data-title="Maintenance"><span class="nav-icon">{{ icon('wrench') }}</span> Maintenance</a>
+          <a href="{{ url_for('settings.maintenance') }}" data-title="Maintenance"><span class="nav-icon">{{ icon('wrench') }}</span> Maintenance</a>
           <a href="{{ url_for('customers') }}" data-title="Kontak"><span class="nav-icon">{{ icon('users') }}</span> Kontak</a>
-          <a href="{{ url_for('inbox') }}" data-title="Inbox WA"><span class="nav-icon">{{ icon('whatsapp') }}</span> Inbox WA</a>
+          <a href="{{ url_for('whatsapp.inbox') }}" data-title="Inbox WA"><span class="nav-icon">{{ icon('whatsapp') }}</span> Inbox WA</a>
           {% endif %}
-          {% if current_role == 'admin' %}
+          {% if current_user.role == 'admin' %}
           <a href="{{ url_for('users') }}" data-title="Users"><span class="nav-icon">{{ icon('key') }}</span> Users</a>
-          <a href="{{ url_for('settings') }}" data-title="Settings"><span class="nav-icon">{{ icon('sliders') }}</span> Settings</a>
+          <a href="{{ url_for('settings.manage_settings') }}" data-title="Settings"><span class="nav-icon">{{ icon('sliders') }}</span> Settings</a>
           {% endif %}
         </nav>
-        <a href="{{ url_for('logout') }}" class="sidebar-logout" data-no-spa>{{ icon('log-out') }} Logout</a>
+        <a href="{{ url_for('auth.logout') }}" class="sidebar-logout" data-no-spa>{{ icon('log-out') }} Logout</a>
       </aside>
       <main class="main-content">
         <div id="view-root">{% block content %}{% endblock %}</div>

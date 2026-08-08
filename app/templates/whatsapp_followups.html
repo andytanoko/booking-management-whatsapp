@@ -28,7 +28,7 @@
           <td>{{ item.reason }}</td>
           <td>
             {% if item.phone %}
-            <a href="{{ url_for('bookings', phone=item.phone, customer_name=item.customer_name) }}" class="btn-small btn-secondary">{{ icon('plus-circle') }} Buat Booking</a>
+            <a href="{{ url_for('bookings.list_bookings', phone=item.phone, customer_name=item.customer_name) }}" class="btn-small btn-secondary">{{ icon('plus-circle') }} Buat Booking</a>
             {% endif %}
           </td>
         </tr>

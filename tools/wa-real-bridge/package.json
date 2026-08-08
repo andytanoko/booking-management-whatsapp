@@ -4,7 +4,8 @@
   "private": true,
   "main": "bridge.js",
   "scripts": {
-    "start": "node bridge.js"
+    "start": "node bridge.js",
+    "uat": "node ../../tests/chromium-uat.js"
   },
   "dependencies": {
     "express": "^4.21.2",

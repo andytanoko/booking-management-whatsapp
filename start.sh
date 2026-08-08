@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #
 # start.sh — Bootstrap and run the Detailing Ops Flask app.
 #
@@ -8,6 +8,8 @@
 #   ./start.sh --skip-install   # skip dependency installation (faster restarts)
 #
 set -euo pipefail
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 # Resolve the project root (directory of this script) so it works from anywhere.
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

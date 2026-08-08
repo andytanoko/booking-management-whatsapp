@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from typing import Dict, List
 
+from flask import current_app
 
 from app.models import AppSetting, db
 
 
-def get_setting(key: str, default: str = "") -> str:
+def get_setting(key: str, default: str = '') -> str:
     item = AppSetting.query.filter_by(key=key).first()
     if not item:
         return default
@@ -21,15 +23,11 @@ def set_setting(key: str, value: str) -> None:
         item.value = value
 
 
-
-
-
-
 def get_many(keys: List[str]) -> Dict[str, str]:
     try:
         rows = AppSetting.query.filter(AppSetting.key.in_(keys)).all()
-        row_map = {row.key: (row.value or "") for row in rows}
-        return {key: row_map.get(key, "") for key in keys}
+        row_map = {row.key: (row.value or '') for row in rows}
+        return {key: row_map.get(key, '') for key in keys}
     except Exception as e:
-        current_app.logger.error(f"Error getting multiple settings: {e}")
-        return {key: "" for key in keys}
+        current_app.logger.error(f'Error getting multiple settings: {e}')
+        return {key: '' for key in keys}

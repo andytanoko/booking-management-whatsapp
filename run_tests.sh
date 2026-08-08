@@ -1,43 +1,36 @@
 #!/bin/bash
 # Quick Test Runner Script
 
+set -euo pipefail
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 echo "================================"
-echo "Unit Test Suite - Quick Start"
+echo "Unit Test Suite - Docker Run"
 echo "================================"
 echo ""
 
-cd /Users/andy.tanoko/ai/test
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_ROOT"
 
-# Check if dependencies are installed
-echo "Checking dependencies..."
-python3 -m pip list | grep -q pytest
-if [ $? -ne 0 ]; then
-    echo "Installing test dependencies..."
-    python3 -m pip install -q -r requirements.txt
+if command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE=(docker-compose)
+elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    COMPOSE=(docker compose)
+else
+    echo "Error: neither 'docker compose' nor 'docker-compose' is available." >&2
+    exit 1
 fi
 
+echo "Starting test dependencies..."
+"${COMPOSE[@]}" up -d db
+
 echo ""
-echo "Running tests..."
+echo "Running tests in the web container..."
 echo "================================"
 
-# Run tests with coverage
-python3 -m pytest tests/ \
-    --cov=app \
-    --cov-report=html \
-    --cov-report=term-missing \
-    -v \
-    --tb=short
+"${COMPOSE[@]}" run --rm web python -m pytest -q
 
 echo ""
 echo "================================"
 echo "Test run complete!"
-echo ""
-echo "Coverage report: htmlcov/index.html"
-echo "Open in browser: open htmlcov/index.html"
-echo ""
-echo "Quick commands:"
-echo "  - Run specific file: pytest tests/test_models.py -v"
-echo "  - Run pattern: pytest tests/ -k 'booking' -v"
-echo "  - Quiet mode: pytest tests/ -q"
-echo "  - Stop on failure: pytest tests/ -x"
-echo ""

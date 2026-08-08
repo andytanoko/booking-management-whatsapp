@@ -83,7 +83,7 @@
               {% if item.status in ['kendaraan_masuk', 'dikerjakan', 'qc', 'siap_diambil', 'selesai'] %}
               <button type="button" class="btn-small btn-secondary" disabled aria-label="Edit booking (terkunci)">{{ icon('edit') }} Edit</button>
               {% else %}
-              <button type="button" class="btn-small btn-secondary" onclick="window.location.href='{{ url_for('edit_booking', booking_id=item.id) }}'">{{ icon('edit') }} Edit</button>
+              <button type="button" class="btn-small btn-secondary" onclick="window.location.href='{{ url_for('bookings.edit_booking', booking_id=item.id) }}'">{{ icon('edit') }} Edit</button>
               {% endif %}
             </div>
             <form method="post" class="status-form" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-top:0.75rem;">

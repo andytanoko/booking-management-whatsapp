@@ -45,6 +45,10 @@
     });
   }
 
+  function isFullDocumentHtml(html) {
+    return /<html[\s>]|<body[\s>]|id=["']view-root["']|class=["']app-shell["']/.test(html);
+  }
+
   function applyHtml(html, pushUrl, title) {
     runCleanup();
     viewRoot.innerHTML = html;
@@ -83,6 +87,10 @@
         }
         var finalUrl = res.url || url;
         return res.text().then(function (html) {
+          if (isFullDocumentHtml(html)) {
+            window.location.href = finalUrl;
+            return null;
+          }
           return { html: html, finalUrl: finalUrl };
         });
       })
