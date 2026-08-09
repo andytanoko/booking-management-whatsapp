@@ -5,6 +5,7 @@ from flask_login import current_user, login_required
 
 from app.models import AuditLog, Booking, MaintenanceReminder, ServiceType, db
 from app.services.booking_engine import compute_booking_end
+from app.services.reminders import DEFAULT_APPOINTMENT_REMINDER_TEMPLATE
 from app.services.settings_store import get_many, get_setting, set_setting
 from app.services.whatsapp import (
     create_wa_instance,
@@ -58,6 +59,7 @@ def manage_settings():
         setting_keys = [
             'booking_done_template',
             'reschedule_template',
+            'appointment_reminder_template',
             'maintenance_reminder_template',
             'review_request_template',
             'google_maps_business_url',
@@ -201,6 +203,8 @@ def manage_settings():
             settings_map['booking_done_template'] = get_setting('booking_done_template', DEFAULT_BOOKING_DONE_TEMPLATE)
         if not settings_map.get('reschedule_template'):
             settings_map['reschedule_template'] = get_setting('reschedule_template', DEFAULT_RESCHEDULE_TEMPLATE)
+        if not settings_map.get('appointment_reminder_template'):
+            settings_map['appointment_reminder_template'] = get_setting('appointment_reminder_template', DEFAULT_APPOINTMENT_REMINDER_TEMPLATE)
         if not settings_map.get('maintenance_reminder_template'):
             settings_map['maintenance_reminder_template'] = get_setting('maintenance_reminder_template', DEFAULT_MAINTENANCE_REMINDER_TEMPLATE)
         if not settings_map.get('review_request_template'):
@@ -338,7 +342,7 @@ def maintenance():
     reminders = MaintenanceReminder.query.join(Booking).order_by(MaintenanceReminder.maintenance_due_at.asc()).all()
     reminder_template = get_setting('maintenance_reminder_template', DEFAULT_MAINTENANCE_REMINDER_TEMPLATE)
     review_template = get_setting('review_request_template', DEFAULT_REVIEW_REQUEST_TEMPLATE)
-    review_link = get_setting('google_maps_business_url', 'https://maps.app.goo.gl/sSL6Hmv5dn8aqKxZ8')
+    review_link = get_setting('google_maps_business_url', '')
     drafts = {}
     for reminder in reminders:
         drafts[reminder.id] = {

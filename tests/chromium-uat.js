@@ -334,6 +334,7 @@ async function main() {
       action: 'save',
       booking_done_template: 'Chromium done {nama}',
       reschedule_template: 'Chromium reschedule {nama}',
+      appointment_reminder_template: 'Chromium reminder {nama}',
       maintenance_reminder_template: 'Chromium maintenance {nama}',
       review_request_template: 'Chromium review {nama}',
       daily_capacity: '4',
@@ -348,6 +349,8 @@ async function main() {
     }
     const templateValue = await getValue('textarea[name="booking_done_template"]');
     if (!String(templateValue || '').includes('Chromium done')) fail('Settings save did not persist the booking template');
+    const reminderTemplateValue = await getValue('textarea[name="appointment_reminder_template"]');
+    if (!String(reminderTemplateValue || '').includes('Chromium reminder')) fail('Settings save did not persist the appointment reminder template');
 
     const rescheduleCreate = await postForm('/bookings', {
       action: 'create',

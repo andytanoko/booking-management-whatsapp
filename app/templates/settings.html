@@ -173,6 +173,20 @@ function resetServiceForm() {
 </section>
 
 <section class="card">
+  <div class="card-header">{{ icon('clock') }}<h2>Template Notifikasi "Pengingat Booking"</h2></div>
+  <p>Pesan pengingat otomatis sebelum jadwal booking (H-3, H-1, dan H-8 jam). Dikirim otomatis ke customer yang sudah dikonfirmasi.</p>
+  <form method="post" class="form-grid">
+    <label>Isi Template
+      <textarea name="appointment_reminder_template" rows="5">{{ settings.appointment_reminder_template }}</textarea>
+    </label>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code>, <code>{jam}</code></p>
+    <div class="form-actions">
+      <button type="submit" name="action" value="save">{{ icon('save') }} Simpan Template</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
   <div class="card-header">{{ icon('wrench') }}<h2>Template Notifikasi "Maintenance Reminder"</h2></div>
   <p>Pesan pengingat 6 bulan setelah customer selesai coating / PPF. Dikirim otomatis saat maintenance_due_at tercapai, atau manual dari halaman maintenance.</p>
   <form method="post" class="form-grid">

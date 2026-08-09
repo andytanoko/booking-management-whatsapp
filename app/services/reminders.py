@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Callable
 
 from app.models import Booking, ReminderLog, db
+from app.services.settings_store import get_setting
 from app.services.whatsapp import send_and_log_message
 
 
@@ -17,6 +18,12 @@ REMINDER_RULES = {
     "H1": timedelta(days=1),      # 1 day before
     "H8": timedelta(hours=8),     # 8 hours before
 }
+
+# Default template for automatic pre-appointment reminders; configurable in Settings.
+DEFAULT_APPOINTMENT_REMINDER_TEMPLATE = (
+    'Halo {nama}, mengingatkan booking *{layanan}* Anda dijadwalkan pada '
+    '{tanggal} pukul {jam}. Sampai jumpa ya! 🙏'
+)
 
 # Default dispatch window for scheduler jitter tolerance (minutes)
 DEFAULT_DISPATCH_WINDOW = 15
@@ -90,10 +97,13 @@ class ReminderService:
         Returns:
             Formatted message text
         """
-        scheduled_str = booking.scheduled_start.strftime('%d-%m-%Y %H:%M')
+        template = get_setting('appointment_reminder_template', DEFAULT_APPOINTMENT_REMINDER_TEMPLATE) or DEFAULT_APPOINTMENT_REMINDER_TEMPLATE
+        scheduled = booking.scheduled_start
         return (
-            f"Pengingat {reminder_type}: Booking {booking.service_type.name} "
-            f"atas nama {booking.customer.name} pukul {scheduled_str}"
+            template.replace('{nama}', booking.customer.name if booking.customer else 'Kak')
+            .replace('{layanan}', booking.service_type.name if booking.service_type else 'layanan')
+            .replace('{tanggal}', scheduled.strftime('%d-%m-%Y') if scheduled else '-')
+            .replace('{jam}', scheduled.strftime('%H:%M') if scheduled else '-')
         )
 
     def send_reminder(

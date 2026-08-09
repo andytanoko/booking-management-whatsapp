@@ -35,7 +35,7 @@ ON CONFLICT (name) DO NOTHING;
 
 -- Default Google Maps business URL shown in the review-request template.
 INSERT INTO app_setting (key, value, updated_at) VALUES
-  ('google_maps_business_url', 'https://maps.app.goo.gl/sSL6Hmv5dn8aqKxZ8', CURRENT_TIMESTAMP)
+  ('google_maps_business_url', 'https://maps.app.goo.gl/nETWsxQNNUmYjZSE6', CURRENT_TIMESTAMP)
 ON CONFLICT (key) DO NOTHING;
 
 COMMIT;
