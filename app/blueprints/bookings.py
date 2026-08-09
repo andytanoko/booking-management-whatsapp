@@ -105,7 +105,7 @@ def list_bookings():
         if action == 'update_status':
             booking_id = int(request.form.get('booking_id', '0') or 0)
             new_status = request.form.get('status', '').strip().lower()
-            booking = Booking.query.get(booking_id)
+            booking = db.session.get(Booking, booking_id)
             if not booking:
                 error = 'Booking tidak ditemukan'
             elif new_status not in BOOKING_STATUSES:
@@ -134,7 +134,7 @@ def list_bookings():
         if action == 'notify_customer':
             booking_id = int(request.form.get('booking_id', '0') or 0)
             text = request.form.get('message', '').strip()
-            booking = Booking.query.get(booking_id)
+            booking = db.session.get(Booking, booking_id)
             if not booking:
                 error = 'Booking tidak ditemukan'
             elif not text:
@@ -158,7 +158,7 @@ def list_bookings():
         if action == 'request_reschedule':
             booking_id = int(request.form.get('booking_id', '0') or 0)
             new_date_raw = request.form.get('new_scheduled_start', '').strip()
-            booking = Booking.query.get(booking_id)
+            booking = db.session.get(Booking, booking_id)
             if not booking:
                 error = 'Booking tidak ditemukan'
             elif booking.status == 'reschedule':
@@ -217,7 +217,7 @@ def list_bookings():
                 else:
                     error = "Service default 'Lainnya' tidak tersedia"
         elif service_id:
-            service = ServiceType.query.get(service_id)
+            service = db.session.get(ServiceType, service_id)
             if not service:
                 error = 'Layanan tidak ditemukan'
         else:
@@ -279,7 +279,7 @@ def edit_booking(booking_id: int):
     if not _authorized():
         return redirect(url_for('dashboard'))
 
-    booking = Booking.query.get(booking_id)
+    booking = db.session.get(Booking, booking_id)
     if not booking:
         return 'Booking tidak ditemukan', 404
 
@@ -324,7 +324,7 @@ def edit_booking(booking_id: int):
                             package_note = f'Paket: {package_name} (tidak cocok dengan layanan standard, masuk ke Lainnya)'
                             notes = f'{package_note}\n{notes}' if notes else package_note
                 elif service_id:
-                    service = ServiceType.query.get(service_id)
+                    service = db.session.get(ServiceType, service_id)
                     if not service:
                         error = 'Layanan tidak ditemukan'
                 else:

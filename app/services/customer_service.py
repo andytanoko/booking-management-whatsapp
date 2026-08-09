@@ -7,7 +7,10 @@ import re
 
 
 from typing import Optional
+from flask import current_app
+
 from app.models import Customer, db
+from app.services.db_ops import safe_commit
 
 
 class CustomerService:
@@ -108,7 +111,8 @@ class CustomerService:
                 notes="Otomatis dari WhatsApp"
             )
             db.session.add(customer)
-            db.session.commit()
+            if not safe_commit("customer find_or_create insert"):
+                return None
             return customer
         
         # Update existing customer
@@ -145,7 +149,7 @@ class CustomerService:
             changed = True
         
         if changed:
-            db.session.commit()
+            safe_commit("customer update_if_needed")
         
         return customer
 
@@ -183,7 +187,8 @@ class CustomerService:
                     notes="Otomatis dari WhatsApp"
                 )
                 db.session.add(customer)
-                db.session.commit()
+                if not safe_commit("customer get_or_create_by_phone insert"):
+                    return None
             return customer
         except Exception as e:
             current_app.logger.error(f"Error in get_or_create_by_phone: {e}")
@@ -203,7 +208,7 @@ class CustomerService:
         """
         if vehicle_info and vehicle_info.strip():
             customer.vehicle_info = vehicle_info.strip()
-            db.session.commit()
+            safe_commit("customer update_vehicle_info")
         return customer
 
     @staticmethod
@@ -223,7 +228,7 @@ class CustomerService:
                 customer.notes = f"{customer.notes}\n{notes}"
             else:
                 customer.notes = notes
-            db.session.commit()
+            safe_commit("customer update_notes")
         return customer
 
     @staticmethod
@@ -251,7 +256,7 @@ class CustomerService:
         Returns:
             Customer or None if not found
         """
-        return Customer.query.get(customer_id)
+        return db.session.get(Customer, customer_id)
 
     @staticmethod
     def list_all() -> list:

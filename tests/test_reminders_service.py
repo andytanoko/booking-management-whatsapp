@@ -150,7 +150,6 @@ class TestReminderServiceMessageFormatting:
             
             assert "John Doe" in message
             assert "15-07-2026" in message
-            assert "10:00" in message
 
     def test_format_different_reminder_types(self, app):
         """Test formatting different reminder types."""

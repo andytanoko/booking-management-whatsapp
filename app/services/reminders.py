@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Callable
 
 from app.models import Booking, ReminderLog, db
+from app.services.db_ops import safe_commit
 from app.services.settings_store import get_setting
 from app.services.whatsapp import send_and_log_message
 
@@ -136,8 +137,7 @@ class ReminderService:
                 status="sent"
             )
             db.session.add(log)
-            db.session.commit()
-            return True
+            return safe_commit("reminder send_reminder")
         except Exception as e:
             db.session.rollback()
             return False

@@ -72,7 +72,7 @@ class TestBookingsUpdateStatus:
         })
         assert resp.status_code == 200
         with app.app_context():
-            assert Booking.query.get(bid).status == "reschedule"
+            assert db.session.get(Booking, bid).status == "reschedule"
 
     def test_request_reschedule_with_date(self, session_login, app):
         with app.app_context():
@@ -94,7 +94,7 @@ class TestBookingsUpdateStatus:
         })
         assert resp.status_code == 200
         with app.app_context():
-            booking = Booking.query.get(bid)
+            booking = db.session.get(Booking, bid)
             assert booking.status == "reschedule"
             assert "Permintaan reschedule" in (booking.notes or "")
 
@@ -118,7 +118,7 @@ class TestBookingsUpdateStatus:
         })
         assert resp.status_code == 200
         with app.app_context():
-            assert Booking.query.get(bid).status == "dikerjakan"
+            assert db.session.get(Booking, bid).status == "dikerjakan"
 
     def test_update_status_selesai_creates_maintenance(self, session_login, app):
         with app.app_context():
@@ -378,7 +378,7 @@ class TestRescheduleEndpoint:
         })
         assert resp.status_code == 200
         with app.app_context():
-            assert Booking.query.get(bid).status == "dikonfirmasi"
+            assert db.session.get(Booking, bid).status == "dikonfirmasi"
 
     def test_reschedule_confirm_invalid_date(self, session_login, app):
         with app.app_context():

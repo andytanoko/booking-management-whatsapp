@@ -64,12 +64,12 @@ class TestCustomerOperations:
             customer_id = customer.id
             
             # Update customer
-            customer = Customer.query.get(customer_id)
+            customer = db.session.get(Customer, customer_id)
             customer.name = "Jane Doe"
             db.session.commit()
             
             # Verify update
-            updated = Customer.query.get(customer_id)
+            updated = db.session.get(Customer, customer_id)
             assert updated.name == "Jane Doe"
 
     def test_customer_with_multiple_bookings(self, client, app):

@@ -74,7 +74,7 @@ class TestSettingsServiceCRUD:
         })
         assert resp.status_code == 200
         with app.app_context():
-            svc = ServiceType.query.get(sid)
+            svc = db.session.get(ServiceType, sid)
             assert svc.name == "Temp Svc Updated"
             assert svc.duration_minutes == 120
 
@@ -101,7 +101,7 @@ class TestSettingsServiceCRUD:
         })
         assert resp.status_code == 200
         with app.app_context():
-            assert ServiceType.query.get(sid) is None
+            assert db.session.get(ServiceType, sid) is None
 
     def test_service_delete_in_use(self, session_login, app):
         with app.app_context():
@@ -136,7 +136,7 @@ class TestSettingsServiceCRUD:
         })
         assert resp.status_code == 200
         with app.app_context():
-            assert ServiceType.query.get(sid).active is False
+            assert db.session.get(ServiceType, sid).active is False
 
     def test_service_toggle_not_found(self, session_login, app):
         resp = session_login.post("/settings", data={

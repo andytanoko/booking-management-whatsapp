@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from flask import current_app
 from app.models import WhatsAppMessage, db
+from app.services.db_ops import safe_commit
 
 
 # Labels recognised in booking forms (normalized -> field)
@@ -221,7 +222,8 @@ class MessageService:
             created_at=created_at
         )
         db.session.add(message)
-        db.session.commit()
+        if not safe_commit("message create_message"):
+            raise RuntimeError("Failed to persist WhatsApp message")
         return message
 
     @staticmethod

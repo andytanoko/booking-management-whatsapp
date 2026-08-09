@@ -713,6 +713,14 @@ td {
   margin-top: 2px;
 }
 
+.wa-conv-number {
+  font-size: 0.72rem;
+  color: #667781;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .wa-conv-last {
   display: block;
   font-size: 0.85rem;

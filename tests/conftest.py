@@ -101,7 +101,7 @@ def user(app):
         user_id = user.id
     
     def get_user():
-        return User.query.get(user_id)
+        return db.session.get(User, user_id)
     
     return get_user()
 
@@ -121,7 +121,7 @@ def cs_user(app):
         user_id = user.id
     
     def get_user():
-        return User.query.get(user_id)
+        return db.session.get(User, user_id)
     
     return get_user()
 
@@ -141,7 +141,7 @@ def tech_user(app):
         user_id = user.id
     
     def get_user():
-        return User.query.get(user_id)
+        return db.session.get(User, user_id)
     
     return get_user()
 
@@ -162,7 +162,7 @@ def customer(app):
     
     # Return a callable that fetches the customer in the test context
     def get_customer():
-        return Customer.query.get(customer_id)
+        return db.session.get(Customer, customer_id)
     
     return get_customer()
 
@@ -183,7 +183,7 @@ def customer_with_lid(app):
         customer_id = customer.id
     
     def get_customer():
-        return Customer.query.get(customer_id)
+        return db.session.get(Customer, customer_id)
     
     return get_customer()
 
@@ -205,7 +205,7 @@ def service_type(app):
         service_id = service.id
     
     def get_service():
-        return ServiceType.query.get(service_id)
+        return db.session.get(ServiceType, service_id)
     
     return get_service()
 
@@ -227,7 +227,7 @@ def service_ppf(app):
         service_id = service.id
     
     def get_service():
-        return ServiceType.query.get(service_id)
+        return db.session.get(ServiceType, service_id)
     
     return get_service()
 
@@ -272,7 +272,7 @@ def booking(app):
         booking_id = booking.id
     
     def get_booking():
-        return Booking.query.get(booking_id)
+        return db.session.get(Booking, booking_id)
     
     return get_booking()
 

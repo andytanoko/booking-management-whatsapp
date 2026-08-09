@@ -12,6 +12,7 @@ from datetime import datetime
 from flask import current_app
 
 from app.models import WhatsAppMessage, db
+from app.services.db_ops import safe_commit
 from app.services.settings_store import get_setting
 
 
@@ -474,7 +475,8 @@ def log_inbound_message(
         created_at=datetime.utcnow(),
     )
     db.session.add(message)
-    db.session.commit()
+    if not safe_commit("whatsapp log_inbound_message"):
+        raise RuntimeError("Failed to persist inbound WhatsApp message")
     return message
 
 
@@ -493,5 +495,6 @@ def send_and_log_message(phone: str, text: str, chat_id: str | None = None) -> W
         created_at=datetime.utcnow(),
     )
     db.session.add(message)
-    db.session.commit()
+    if not safe_commit("whatsapp send_and_log_message"):
+        raise RuntimeError("Failed to persist outbound WhatsApp message")
     return message

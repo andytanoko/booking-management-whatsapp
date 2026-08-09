@@ -19,6 +19,7 @@
             <span class="wa-conv-name">{{ c.name }}</span>
             <span class="wa-conv-time">{{ c.last_time }}</span>
           </div>
+          <div class="wa-conv-number"{% if not c.number_label %} style="display:none"{% endif %}>{{ c.number_label }}</div>
           <div class="wa-conv-sub">
             <span class="wa-conv-last">
               {%- if c.last_direction == 'outbound' %}Anda: {% endif -%}
@@ -135,6 +136,7 @@
         '<div class="wa-conv-main">' +
         '<div class="wa-conv-top"><span class="wa-conv-name">' + esc(row.name) +
         '</span><span class="wa-conv-time">' + esc(row.time) + '</span></div>' +
+        '<div class="wa-conv-number"></div>' +
         '<div class="wa-conv-sub"><span class="wa-conv-last"></span></div>' +
         '</div>';
       return btn;
@@ -186,9 +188,14 @@
       item.setAttribute("data-name", row.name);
       var nameEl = item.querySelector(".wa-conv-name");
       var timeEl = item.querySelector(".wa-conv-time");
+      var numEl = item.querySelector(".wa-conv-number");
       var lastEl = item.querySelector(".wa-conv-last");
       if (nameEl) { nameEl.textContent = row.name; }
       if (timeEl) { timeEl.textContent = row.time; }
+      if (numEl) {
+        numEl.textContent = row.number_label || "";
+        numEl.style.display = row.number_label ? "" : "none";
+      }
       if (lastEl) { lastEl.textContent = (row.direction === "outbound" ? "Anda: " : "") + row.text; }
       var placeholder = listEl.querySelector(".wa-empty-list");
       if (placeholder) { placeholder.remove(); }
