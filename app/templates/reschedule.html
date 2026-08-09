@@ -28,7 +28,7 @@
           <td>{{ item.id }}</td>
           <td>{{ item.customer.name }}<br /><small>{{ item.customer.phone }}</small></td>
           <td>{{ item.service_type.name }}</td>
-          <td>{{ item.scheduled_start.strftime('%d-%m-%Y %H:%M') }}</td>
+          <td>{{ item.scheduled_start.strftime('%d-%m-%Y') }}</td>
           <td>
             <button type="button" class="btn-small btn-secondary toggle-reschedule-btn" data-toggle-booking="{{ item.id }}" onclick="toggleRescheduleRow({{ item.id }})">
               {{ icon('repeat') }}<span class="toggle-label">Buka Penjadwalan</span>
@@ -46,7 +46,7 @@
   {% for item in reschedules %}
   <div id="form-{{ item.id }}" style="display:none; margin-bottom: 2rem; padding: 1rem; border: 1px solid #ddd; border-radius: 4px;">
     <h3>Booking #{{ item.id }} - {{ item.customer.name }}</h3>
-    <p><strong>Layanan:</strong> {{ item.service_type.name }} | <strong>Jadwal Awal:</strong> {{ item.scheduled_start.strftime('%d-%m-%Y %H:%M') }}</p>
+    <p><strong>Layanan:</strong> {{ item.service_type.name }} | <strong>Jadwal Awal:</strong> {{ item.scheduled_start.strftime('%d-%m-%Y') }}</p>
     
     <div class="form-section">
       <h4>Konfirmasi Jadwal Baru dan Kirim Reminder</h4>

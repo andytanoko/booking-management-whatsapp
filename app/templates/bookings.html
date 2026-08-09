@@ -70,8 +70,8 @@
           <td>{{ item.vehicle_type or '-' }}</td>
           <td>{{ item.license_plate or '-' }}</td>
           <td>{{ item.other_info or '-' }}</td>
-          <td>{{ item.scheduled_start.strftime('%d-%m-%Y %H:%M') }}</td>
-          <td>{{ item.scheduled_end.strftime('%d-%m-%Y %H:%M') }}</td>
+          <td>{{ item.scheduled_start.strftime('%d-%m-%Y') }}</td>
+          <td>{{ item.scheduled_end.strftime('%d-%m-%Y') }}</td>
           <td>
             <span class="status-badge status-{{ item.status }}">
               {{ statuses.get(item.status, item.status) }}

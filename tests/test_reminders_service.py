@@ -169,7 +169,7 @@ class TestReminderServiceMessageFormatting:
             
             reminder_service = ReminderService()
             
-            for reminder_type in ["H3", "H1", "H8"]:
+            for reminder_type in ["H3", "H1"]:
                 message = reminder_service.format_reminder_message(booking, reminder_type)
                 assert "Test" in message
 
@@ -382,4 +382,3 @@ class TestReminderServiceStatus:
             assert "H3" in status
             assert status["H3"] == "sent"
             assert status.get("H1") == "pending"
-            assert status.get("H8") == "pending"

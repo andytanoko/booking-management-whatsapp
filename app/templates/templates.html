@@ -39,12 +39,12 @@
 
 <section class="card">
   <div class="card-header">{{ icon('clock') }}<h2>Template Notifikasi "Pengingat Booking"</h2></div>
-  <p>Pesan pengingat otomatis sebelum jadwal booking (H-3, H-1, dan H-8 jam). Dikirim otomatis ke customer yang sudah dikonfirmasi.</p>
+  <p>Pesan pengingat otomatis sebelum jadwal booking (H-3 dan H-1). Dikirim otomatis ke customer yang sudah dikonfirmasi.</p>
   <form method="post" class="form-grid" action="{{ url_for('settings.manage_templates') }}">
     <label>Isi Template
       <textarea name="appointment_reminder_template" rows="5">{{ settings.appointment_reminder_template }}</textarea>
     </label>
-    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code>, <code>{jam}</code></p>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code></p>
     <div class="form-actions">
       <button type="submit">{{ icon('save') }} Simpan Template</button>
     </div>

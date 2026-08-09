@@ -752,7 +752,7 @@ def create_app():
                             booking.status = 'dikonfirmasi'
                             db.session.add(AuditLog(actor_user_id=current_user.id, action='booking.reschedule_confirm', details=f'booking_id={booking.id} new_start={new_start.isoformat()}'))
                             db.session.commit()
-                            message = f"Reschedule booking #{booking.id} dikonfirmasi. Jadwal baru: {new_start.strftime('%d-%m-%Y %H:%M')}"
+                            message = f"Reschedule booking #{booking.id} dikonfirmasi. Jadwal baru: {new_start.strftime('%d-%m-%Y')}"
                     except ValueError:
                         error = 'Format tanggal tidak valid'
                     except Exception as exc:

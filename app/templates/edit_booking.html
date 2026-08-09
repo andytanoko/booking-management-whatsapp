@@ -67,7 +67,7 @@
       <p><strong>Dibuat:</strong> {{ booking.created_at.strftime('%d-%m-%Y %H:%M') }}</p>
     </div>
     <div>
-      <p><strong>Jadwal Selesai (Otomatis):</strong> {{ booking.scheduled_end.strftime('%d-%m-%Y %H:%M') }}</p>
+      <p><strong>Jadwal Selesai (Otomatis):</strong> {{ booking.scheduled_end.strftime('%d-%m-%Y') }}</p>
       <p><strong>Durasi Layanan:</strong> {{ booking.service_type.duration_minutes }} menit</p>
       {% if booking.assigned_technician %}
       <p><strong>Teknisi:</strong> {{ booking.assigned_technician.username }}</p>

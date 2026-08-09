@@ -372,28 +372,6 @@ class TestApiResponses:
 
 class TestBoundaryConditions:
     """Test boundary conditions and edge cases."""
-    
-    def test_booking_exactly_at_operating_hours(self, app):
-        """Test booking exactly at operating hour boundaries."""
-        with app.app_context():
-            from app.services.booking_engine import is_within_operating_hours
-            
-            # Exactly 9:00 to 10:00
-            start = datetime(2024, 1, 15, 9, 0, 0)
-            end = datetime(2024, 1, 15, 10, 0, 0)
-            
-            assert is_within_operating_hours(start, end) is True
-    
-    def test_booking_just_outside_operating_hours(self, app):
-        """Test booking just outside operating hours."""
-        with app.app_context():
-            from app.services.booking_engine import is_within_operating_hours
-            
-            # 8:59 to 9:59 (starts before opening)
-            start = datetime(2024, 1, 15, 8, 59, 0)
-            end = datetime(2024, 1, 15, 9, 59, 0)
-            
-            assert is_within_operating_hours(start, end) is False
 
 
 class TestDataPersistence:

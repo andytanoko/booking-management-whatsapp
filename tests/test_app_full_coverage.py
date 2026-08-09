@@ -405,7 +405,8 @@ class TestBookingsRoute:
         )
         assert "Format tanggal tidak valid" in resp.get_data(as_text=True)
 
-    def test_create_out_of_hours(self, session_login, app):
+    def test_create_out_of_hours_allowed(self, session_login, app):
+        # Operating-hours restriction removed: early times are accepted.
         with app.app_context():
             sid = ServiceType.query.filter_by(name="Cuci Mobil").first().id
         resp = session_login.post(
@@ -417,13 +418,17 @@ class TestBookingsRoute:
                 "scheduled_start": "2026-08-01T07:00",
             },
         )
-        assert "jam operasional" in resp.get_data(as_text=True)
+        assert "jam operasional" not in resp.get_data(as_text=True)
+        assert resp.status_code == 200
 
     def test_create_conflict(self, session_login, app):
         with app.app_context():
+            from app.services.settings_store import set_setting
+            set_setting("daily_capacity", "1")
+            db.session.commit()
             sid = ServiceType.query.filter_by(name="Cuci Mobil").first().id
             _mk_booking(service_name="Cuci Mobil", phone="628000000001")
-        # existing booking is at 2026-07-20 10:00-12:00
+        # day capacity is 1 and the day already has a booking
         resp = session_login.post(
             "/bookings",
             data={
@@ -604,7 +609,8 @@ class TestEditBookingRoute:
         )
         assert "Layanan tidak ditemukan" in resp.get_data(as_text=True)
 
-    def test_edit_out_of_hours(self, session_login, app):
+    def test_edit_out_of_hours_allowed(self, session_login, app):
+        # Operating-hours restriction removed: early times are accepted.
         with app.app_context():
             bid = _mk_booking().id
             sid = ServiceType.query.filter_by(name="Cuci Mobil").first().id
@@ -618,10 +624,13 @@ class TestEditBookingRoute:
                 "scheduled_start": "2026-09-13T07:00",
             },
         )
-        assert "jam operasional" in resp.get_data(as_text=True)
+        assert "jam operasional" not in resp.get_data(as_text=True)
 
     def test_edit_conflict(self, session_login, app):
         with app.app_context():
+            from app.services.settings_store import set_setting
+            set_setting("daily_capacity", "1")
+            db.session.commit()
             sid = ServiceType.query.filter_by(name="Cuci Mobil").first().id
             _mk_booking(service_name="Cuci Mobil", phone="628000000009")
             bid = _mk_booking(service_name="Cuci Mobil", phone="628000000010").id
@@ -955,6 +964,9 @@ class TestRescheduleRoute:
 
     def test_confirm_conflict(self, session_login, app):
         with app.app_context():
+            from app.services.settings_store import set_setting
+            set_setting("daily_capacity", "1")
+            db.session.commit()
             _mk_booking(status="dikonfirmasi", service_name="Cuci Mobil", phone="628124111000")
             bid = _mk_booking(status="reschedule", service_name="Cuci Mobil", phone="628124111001").id
         resp = session_login.post(

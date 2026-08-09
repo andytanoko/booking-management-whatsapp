@@ -4,7 +4,7 @@ from flask import Blueprint, current_app, redirect, render_template, request, ur
 from flask_login import current_user, login_required
 
 from app.models import AuditLog, Booking, Customer, MaintenanceReminder, ServiceType, db
-from app.services.booking_engine import compute_booking_end, has_conflict, is_within_operating_hours
+from app.services.booking_engine import compute_booking_end, has_conflict
 from app.services.customer_service import CustomerService
 from app.services.semantic_matcher import get_variant_info, match_package_to_service
 from app.services.settings_store import get_setting
@@ -237,9 +237,7 @@ def list_bookings():
 
         if service and start_time and not error:
             end_time = compute_booking_end(service, start_time)
-            if not is_within_operating_hours(start_time, end_time):
-                error = 'Di luar jam operasional'
-            elif has_conflict(start_time, end_time):
+            if has_conflict(start_time, end_time):
                 error = 'Jadwal bentrok dengan booking lain'
             else:
                 customer = Customer.query.filter_by(phone=phone).first()
@@ -345,9 +343,7 @@ def edit_booking(booking_id: int):
 
                     if not error:
                         end_time = compute_booking_end(service, start_time)
-                        if not is_within_operating_hours(start_time, end_time):
-                            error = 'Di luar jam operasional'
-                        elif has_conflict(start_time, end_time, exclude_booking_id=booking.id):
+                        if has_conflict(start_time, end_time, exclude_booking_id=booking.id):
                             error = 'Jadwal bentrok dengan booking lain'
                         else:
                             customer = booking.customer

@@ -157,32 +157,6 @@ class TestBookingEngineAdvanced:
             
             assert end == start + timedelta(minutes=15)
 
-    def test_is_within_operating_hours_valid(self, client, app):
-        """Test valid operating hours"""
-        from datetime import datetime, timedelta
-        
-        with app.app_context():
-            from app.services.booking_engine import is_within_operating_hours
-            
-            # 10:00 - 12:00 is within 09:00 - 18:00
-            start = datetime.now().replace(hour=10, minute=0, second=0, microsecond=0)
-            end = start + timedelta(hours=2)
-            
-            assert is_within_operating_hours(start, end) is True
-
-    def test_is_within_operating_hours_outside(self, client, app):
-        """Test outside operating hours"""
-        from datetime import datetime, timedelta
-        
-        with app.app_context():
-            from app.services.booking_engine import is_within_operating_hours
-            
-            # 22:00 - 23:00 is outside 09:00 - 18:00
-            start = datetime.now().replace(hour=22, minute=0, second=0, microsecond=0)
-            end = start + timedelta(hours=1)
-            
-            assert is_within_operating_hours(start, end) is False
-
     def test_has_conflict_no_bookings(self, client, app):
         """Test conflict check with no existing bookings"""
         from datetime import datetime, timedelta
@@ -203,6 +177,8 @@ class TestBookingEngineAdvanced:
         with app.app_context():
             from app.services.booking_engine import has_conflict
             from app.models import Booking, ServiceType
+            from app.services.settings_store import set_setting
+            set_setting('daily_capacity', '1')
             
             service = ServiceType.query.first()
             customer = Customer(name="Test", phone="628123456789")
@@ -221,7 +197,7 @@ class TestBookingEngineAdvanced:
             db.session.add_all([customer, booking])
             db.session.commit()
             
-            # Same time should conflict
+            # Same day, capacity is 1 -> day is full
             assert has_conflict(start, end) is True
 
     def test_has_conflict_exclude_booking(self, client, app):

@@ -16,13 +16,12 @@ from app.services.whatsapp import send_and_log_message
 REMINDER_RULES = {
     "H3": timedelta(days=3),      # 3 days before
     "H1": timedelta(days=1),      # 1 day before
-    "H8": timedelta(hours=8),     # 8 hours before
 }
 
 # Default template for automatic pre-appointment reminders; configurable in Settings.
 DEFAULT_APPOINTMENT_REMINDER_TEMPLATE = (
     'Halo {nama}, mengingatkan booking *{layanan}* Anda dijadwalkan pada '
-    '{tanggal} pukul {jam}. Sampai jumpa ya! 🙏'
+    '{tanggal}. Sampai jumpa ya! 🙏'
 )
 
 # Default dispatch window for scheduler jitter tolerance (minutes)
@@ -103,7 +102,6 @@ class ReminderService:
             template.replace('{nama}', booking.customer.name if booking.customer else 'Kak')
             .replace('{layanan}', booking.service_type.name if booking.service_type else 'layanan')
             .replace('{tanggal}', scheduled.strftime('%d-%m-%Y') if scheduled else '-')
-            .replace('{jam}', scheduled.strftime('%H:%M') if scheduled else '-')
         )
 
     def send_reminder(

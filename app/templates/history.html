@@ -29,7 +29,7 @@
           <td>{{ item.id }}</td>
           <td>{{ item.customer.name }}<br /><small>{{ item.customer.phone }}</small></td>
           <td>{{ item.service_type.name }}</td>
-          <td>{{ item.scheduled_start.strftime('%d-%m-%Y %H:%M') }}</td>
+          <td>{{ item.scheduled_start.strftime('%d-%m-%Y') }}</td>
           <td>
             <span class="status-badge status-{{ item.status }}">
               {{ statuses.get(item.status, item.status) }}

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.models import db, Booking, ServiceType
-from app.services.booking_engine import compute_booking_end, is_within_operating_hours, has_conflict
+from app.services.booking_engine import compute_booking_end, has_conflict
 from app.services.settings_store import get_setting, set_setting, get_many
 from app.services.semantic_matcher import extract_core_keywords, match_package_to_service
 
@@ -38,44 +38,6 @@ class TestBookingEngine:
             end2 = compute_booking_end(service2, start)
             assert end2 == datetime(2024, 1, 15, 18, 0, 0)
     
-    def test_is_within_operating_hours_valid(self, app):
-        """Test that valid times are within operating hours."""
-        start = datetime(2024, 1, 15, 10, 0, 0)
-        end = datetime(2024, 1, 15, 12, 0, 0)
-        
-        assert is_within_operating_hours(start, end) is True
-    
-    def test_is_within_operating_hours_boundary(self, app):
-        """Test boundary times."""
-        # At opening time
-        start = datetime(2024, 1, 15, 9, 0, 0)
-        end = datetime(2024, 1, 15, 10, 0, 0)
-        assert is_within_operating_hours(start, end) is True
-        
-        # At closing time
-        start = datetime(2024, 1, 15, 17, 0, 0)
-        end = datetime(2024, 1, 15, 18, 0, 0)
-        assert is_within_operating_hours(start, end) is True
-    
-    def test_is_within_operating_hours_outside(self, app):
-        """Test that outside times are rejected."""
-        # Before opening
-        start = datetime(2024, 1, 15, 8, 0, 0)
-        end = datetime(2024, 1, 15, 9, 0, 0)
-        assert is_within_operating_hours(start, end) is False
-        
-        # After closing
-        start = datetime(2024, 1, 15, 17, 0, 0)
-        end = datetime(2024, 1, 15, 19, 0, 0)
-        assert is_within_operating_hours(start, end) is False
-    
-    def test_is_within_operating_hours_overnight(self, app):
-        """Test that overnight bookings are rejected."""
-        start = datetime(2024, 1, 15, 17, 0, 0)
-        end = datetime(2024, 1, 16, 10, 0, 0)
-        
-        assert is_within_operating_hours(start, end) is False
-    
     def test_has_conflict_no_conflict(self, app, customer, service_type):
         """Test no conflict when slot is free."""
         with app.app_context():
@@ -96,8 +58,9 @@ class TestBookingEngine:
             assert has_conflict(start, end) is False
     
     def test_has_conflict_with_existing_booking(self, app, customer, service_type):
-        """Test conflict detection with existing booking."""
+        """Test conflict when the day's capacity is reached."""
         with app.app_context():
+            set_setting('daily_capacity', '1')
             # Create existing booking
             existing = Booking(
                 customer_id=customer.id,
@@ -109,7 +72,7 @@ class TestBookingEngine:
             db.session.add(existing)
             db.session.commit()
             
-            # Try to create overlapping booking
+            # Same day, capacity is 1 -> day is full
             start = datetime(2024, 1, 15, 11, 0, 0)
             end = datetime(2024, 1, 15, 13, 0, 0)
             
