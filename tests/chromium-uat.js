@@ -332,25 +332,33 @@ async function main() {
     if (!(await textContains('Settings'))) fail('Settings page did not render');
     const settingsSave = await postForm('/settings', {
       action: 'save',
+      daily_capacity: '4',
+    });
+    if (!String(settingsSave.text || '').includes('Settings berhasil disimpan')) {
+      fail('Settings save flow did not return the success message');
+    }
+
+    await navigate(`${baseUrl}/templates`);
+    if (!(await textContains('Template Pesan WhatsApp'))) fail('Template page did not render');
+    const templatesSave = await postForm('/templates', {
       booking_done_template: 'Chromium done {nama}',
       reschedule_template: 'Chromium reschedule {nama}',
       appointment_reminder_template: 'Chromium reminder {nama}',
       maintenance_reminder_template: 'Chromium maintenance {nama}',
       review_request_template: 'Chromium review {nama}',
-      daily_capacity: '4',
       google_maps_business_url: 'https://example.com',
     });
-    if (!String(settingsSave.text || '').includes('Settings berhasil disimpan')) {
-      fail('Settings save flow did not return the success message');
+    if (!String(templatesSave.text || '').includes('Template berhasil disimpan')) {
+      fail('Template save flow did not return the success message');
     }
-    await navigate(`${baseUrl}/settings`);
+    await navigate(`${baseUrl}/templates`);
     if (!String(await getValue('input[name="google_maps_business_url"]') || '').includes('example.com')) {
-      fail('Settings save did not persist the Google Maps URL');
+      fail('Template save did not persist the Google Maps URL');
     }
     const templateValue = await getValue('textarea[name="booking_done_template"]');
-    if (!String(templateValue || '').includes('Chromium done')) fail('Settings save did not persist the booking template');
+    if (!String(templateValue || '').includes('Chromium done')) fail('Template save did not persist the booking template');
     const reminderTemplateValue = await getValue('textarea[name="appointment_reminder_template"]');
-    if (!String(reminderTemplateValue || '').includes('Chromium reminder')) fail('Settings save did not persist the appointment reminder template');
+    if (!String(reminderTemplateValue || '').includes('Chromium reminder')) fail('Template save did not persist the appointment reminder template');
 
     const rescheduleCreate = await postForm('/bookings', {
       action: 'create',

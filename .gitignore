@@ -69,4 +69,4 @@ instance/
 # Logs
 *.log
 logs/
-booking-management-whatsapp/export-and-send.sh
+export-and-send.sh

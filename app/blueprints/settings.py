@@ -38,6 +38,15 @@ DEFAULT_REVIEW_REQUEST_TEMPLATE = (
     'Bantu kami berkembang dengan memberikan review di Google Maps: {link_review} 🙏'
 )
 
+# All message templates that CS/admin can edit from the Template page.
+TEMPLATE_DEFAULTS = {
+    'booking_done_template': DEFAULT_BOOKING_DONE_TEMPLATE,
+    'reschedule_template': DEFAULT_RESCHEDULE_TEMPLATE,
+    'appointment_reminder_template': DEFAULT_APPOINTMENT_REMINDER_TEMPLATE,
+    'maintenance_reminder_template': DEFAULT_MAINTENANCE_REMINDER_TEMPLATE,
+    'review_request_template': DEFAULT_REVIEW_REQUEST_TEMPLATE,
+}
+
 
 def _authorized(*roles: str) -> bool:
     return current_user.is_authenticated and current_user.role in roles
@@ -57,12 +66,6 @@ def manage_settings():
         message = None
         error = None
         setting_keys = [
-            'booking_done_template',
-            'reschedule_template',
-            'appointment_reminder_template',
-            'maintenance_reminder_template',
-            'review_request_template',
-            'google_maps_business_url',
             'daily_capacity',
         ]
 
@@ -199,20 +202,8 @@ def manage_settings():
                         error = f'Gagal menghapus nomor WhatsApp: {status}'
 
         settings_map = get_many(setting_keys)
-        if not settings_map.get('booking_done_template'):
-            settings_map['booking_done_template'] = get_setting('booking_done_template', DEFAULT_BOOKING_DONE_TEMPLATE)
-        if not settings_map.get('reschedule_template'):
-            settings_map['reschedule_template'] = get_setting('reschedule_template', DEFAULT_RESCHEDULE_TEMPLATE)
-        if not settings_map.get('appointment_reminder_template'):
-            settings_map['appointment_reminder_template'] = get_setting('appointment_reminder_template', DEFAULT_APPOINTMENT_REMINDER_TEMPLATE)
-        if not settings_map.get('maintenance_reminder_template'):
-            settings_map['maintenance_reminder_template'] = get_setting('maintenance_reminder_template', DEFAULT_MAINTENANCE_REMINDER_TEMPLATE)
-        if not settings_map.get('review_request_template'):
-            settings_map['review_request_template'] = get_setting('review_request_template', DEFAULT_REVIEW_REQUEST_TEMPLATE)
         if not settings_map.get('daily_capacity'):
             settings_map['daily_capacity'] = get_setting('daily_capacity', '4')
-        if not settings_map.get('google_maps_business_url'):
-            settings_map['google_maps_business_url'] = get_setting('google_maps_business_url', '')
 
         from app import app as app_module
 
@@ -252,6 +243,43 @@ def manage_settings():
     except Exception as e:
         current_app.logger.error(f'Error in manage_settings: {e}')
         return redirect(url_for('dashboard'))
+
+
+@settings_bp.route('/templates', methods=['GET', 'POST'])
+@login_required
+def manage_templates():
+    if not _authorized('admin', 'cs'):
+        return redirect(url_for('dashboard'))
+
+    message = None
+    error = None
+    template_keys = list(TEMPLATE_DEFAULTS.keys())
+
+    if request.method == 'POST':
+        for key in template_keys:
+            value = request.form.get(key, '').strip()
+            if value:
+                set_setting(key, value)
+        review_url = request.form.get('google_maps_business_url', '').strip()
+        if review_url:
+            set_setting('google_maps_business_url', review_url)
+        db.session.add(AuditLog(actor_user_id=current_user.id, action='settings.templates.update', details='templates'))
+        db.session.commit()
+        message = 'Template berhasil disimpan'
+
+    settings_map = get_many(template_keys + ['google_maps_business_url'])
+    for key, default in TEMPLATE_DEFAULTS.items():
+        if not settings_map.get(key):
+            settings_map[key] = get_setting(key, default)
+
+    return render_template(
+        'templates.html',
+        settings=settings_map,
+        message=message,
+        error=error,
+        partial=wants_partial(),
+    )
+
 
 
 @settings_bp.route('/maintenance', methods=['GET', 'POST'])

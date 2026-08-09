@@ -145,76 +145,6 @@ function resetServiceForm() {
 </script>
 
 <section class="card">
-  <div class="card-header">{{ icon('check-circle') }}<h2>Template Notifikasi "Booking Selesai"</h2></div>
-  <p>Pesan default yang muncul saat booking berstatus <b>Selesai</b>. CS tetap bisa mengedit sebelum mengirim.</p>
-  <form method="post" class="form-grid">
-    <label>Isi Template
-      <textarea name="booking_done_template" rows="5">{{ settings.booking_done_template }}</textarea>
-    </label>
-    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code></p>
-    <div class="form-actions">
-      <button type="submit" name="action" value="save">{{ icon('save') }} Simpan Template</button>
-    </div>
-  </form>
-</section>
-
-<section class="card">
-  <div class="card-header">{{ icon('repeat') }}<h2>Template Notifikasi "Reschedule"</h2></div>
-  <p>Pesan reminder saat ada permintaan reschedule booking. Dikirim otomatis ke customer untuk konfirmasi jadwal baru.</p>
-  <form method="post" class="form-grid">
-    <label>Isi Template
-      <textarea name="reschedule_template" rows="5">{{ settings.reschedule_template }}</textarea>
-    </label>
-    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_lama}</code>, <code>{tanggal_baru}</code></p>
-    <div class="form-actions">
-      <button type="submit" name="action" value="save">{{ icon('save') }} Simpan Template</button>
-    </div>
-  </form>
-</section>
-
-<section class="card">
-  <div class="card-header">{{ icon('clock') }}<h2>Template Notifikasi "Pengingat Booking"</h2></div>
-  <p>Pesan pengingat otomatis sebelum jadwal booking (H-3, H-1, dan H-8 jam). Dikirim otomatis ke customer yang sudah dikonfirmasi.</p>
-  <form method="post" class="form-grid">
-    <label>Isi Template
-      <textarea name="appointment_reminder_template" rows="5">{{ settings.appointment_reminder_template }}</textarea>
-    </label>
-    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code>, <code>{jam}</code></p>
-    <div class="form-actions">
-      <button type="submit" name="action" value="save">{{ icon('save') }} Simpan Template</button>
-    </div>
-  </form>
-</section>
-
-<section class="card">
-  <div class="card-header">{{ icon('wrench') }}<h2>Template Notifikasi "Maintenance Reminder"</h2></div>
-  <p>Pesan pengingat 6 bulan setelah customer selesai coating / PPF. Dikirim otomatis saat maintenance_due_at tercapai, atau manual dari halaman maintenance.</p>
-  <form method="post" class="form-grid">
-    <label>Isi Template
-      <textarea name="maintenance_reminder_template" rows="5">{{ settings.maintenance_reminder_template }}</textarea>
-    </label>
-    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_selesai}</code></p>
-    <div class="form-actions">
-      <button type="submit" name="action" value="save">{{ icon('save') }} Simpan Template</button>
-    </div>
-  </form>
-</section>
-
-<section class="card">
-  <div class="card-header">{{ icon('star') }}<h2>Template Notifikasi "Google Maps Review"</h2></div>
-  <p>Pesan untuk meminta customer memberikan review di Google Maps setelah selesai coating / PPF.</p>
-  <form method="post" class="form-grid">
-    <label>Isi Template
-      <textarea name="review_request_template" rows="5">{{ settings.review_request_template }}</textarea>
-    </label>
-    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{link_review}</code></p>
-    <div class="form-actions">
-      <button type="submit" name="action" value="save">{{ icon('save') }} Simpan Template</button>
-    </div>
-  </form>
-</section>
-
-<section class="card">
   <div class="card-header">{{ icon('calendar') }}<h2>Daily Capacity Booking</h2></div>
   <p>Atur berapa mobil maksimal yang dapat dilayani per hari. Defaultnya 4.</p>
   <form method="post" class="form-grid">
@@ -224,19 +154,6 @@ function resetServiceForm() {
     <p class="hint">Masukkan 0 untuk menggunakan logika bentrok lama berdasarkan overlap waktu.</p>
     <div class="form-actions">
       <button type="submit" name="action" value="save">{{ icon('save') }} Simpan Capacity</button>
-    </div>
-  </form>
-</section>
-
-<section class="card">
-  <div class="card-header">{{ icon('map-pin') }}<h2>Konfigurasi Google Maps</h2></div>
-  <p>URL bisnis Google Maps Anda untuk diminta review dari customer. Akan digunakan di template review request.</p>
-  <form method="post" class="form-grid">
-    <label>Google Maps Business URL
-      <input type="url" name="google_maps_business_url" placeholder="https://www.google.com/maps/place/..." value="{{ settings.google_maps_business_url or '' }}" />
-    </label>
-    <div class="form-actions">
-      <button type="submit" name="action" value="save">{{ icon('save') }} Simpan URL</button>
     </div>
   </form>
 </section>
