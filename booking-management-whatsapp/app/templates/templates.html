@@ -1,0 +1,84 @@
+{% extends 'partial.html' if partial else 'base.html' %}
+{% from '_icons.html' import icon %}
+{% block content %}
+{% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+
+<section class="card">
+  <div class="card-header">{{ icon('edit') }}<h2>Template Pesan WhatsApp</h2></div>
+  <p>Semua pesan otomatis ke customer memakai template di bawah. CS &amp; Admin dapat mengubahnya. Gunakan placeholder yang tersedia; teks masih bisa diedit sebelum dikirim.</p>
+</section>
+
+<section class="card">
+  <div class="card-header">{{ icon('check-circle') }}<h2>Template Notifikasi "Booking Selesai"</h2></div>
+  <p>Pesan default yang muncul saat booking berstatus <b>Selesai</b>. CS tetap bisa mengedit sebelum mengirim.</p>
+  <form method="post" class="form-grid" action="{{ url_for('settings.manage_templates') }}">
+    <label>Isi Template
+      <textarea name="booking_done_template" rows="5">{{ settings.booking_done_template }}</textarea>
+    </label>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code></p>
+    <div class="form-actions">
+      <button type="submit">{{ icon('save') }} Simpan Template</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">{{ icon('repeat') }}<h2>Template Notifikasi "Reschedule"</h2></div>
+  <p>Pesan reminder saat ada permintaan reschedule booking. Dikirim ke customer untuk konfirmasi jadwal baru.</p>
+  <form method="post" class="form-grid" action="{{ url_for('settings.manage_templates') }}">
+    <label>Isi Template
+      <textarea name="reschedule_template" rows="5">{{ settings.reschedule_template }}</textarea>
+    </label>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_lama}</code>, <code>{tanggal_baru}</code></p>
+    <div class="form-actions">
+      <button type="submit">{{ icon('save') }} Simpan Template</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">{{ icon('clock') }}<h2>Template Notifikasi "Pengingat Booking"</h2></div>
+  <p>Pesan pengingat otomatis sebelum jadwal booking (H-3, H-1, dan H-8 jam). Dikirim otomatis ke customer yang sudah dikonfirmasi.</p>
+  <form method="post" class="form-grid" action="{{ url_for('settings.manage_templates') }}">
+    <label>Isi Template
+      <textarea name="appointment_reminder_template" rows="5">{{ settings.appointment_reminder_template }}</textarea>
+    </label>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code>, <code>{jam}</code></p>
+    <div class="form-actions">
+      <button type="submit">{{ icon('save') }} Simpan Template</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">{{ icon('wrench') }}<h2>Template Notifikasi "Maintenance Reminder"</h2></div>
+  <p>Pesan pengingat 6 bulan setelah customer selesai coating / PPF. Dikirim manual dari halaman maintenance.</p>
+  <form method="post" class="form-grid" action="{{ url_for('settings.manage_templates') }}">
+    <label>Isi Template
+      <textarea name="maintenance_reminder_template" rows="5">{{ settings.maintenance_reminder_template }}</textarea>
+    </label>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_selesai}</code></p>
+    <div class="form-actions">
+      <button type="submit">{{ icon('save') }} Simpan Template</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-header">{{ icon('star') }}<h2>Template Notifikasi "Google Maps Review"</h2></div>
+  <p>Pesan untuk meminta customer memberikan review di Google Maps setelah selesai coating / PPF.</p>
+  <form method="post" class="form-grid" action="{{ url_for('settings.manage_templates') }}">
+    <label>Isi Template
+      <textarea name="review_request_template" rows="5">{{ settings.review_request_template }}</textarea>
+    </label>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{link_review}</code></p>
+    <label>URL Google Maps (untuk <code>{link_review}</code>)
+      <input type="url" name="google_maps_business_url" placeholder="https://maps.app.goo.gl/..." value="{{ settings.google_maps_business_url or '' }}" />
+    </label>
+    <div class="form-actions">
+      <button type="submit">{{ icon('save') }} Simpan Template</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
