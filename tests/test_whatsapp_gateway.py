@@ -48,8 +48,22 @@ class TestMockGateway:
 
 
 class TestGetGateway:
-    def test_get_gateway_always_bridge(self, app):
+    def test_get_gateway_defaults_to_mock(self, app):
         with app.app_context():
+            app.config["WHATSAPP_MODE"] = "mock"
+            gw = get_gateway()
+            assert isinstance(gw, MockWhatsAppGateway)
+
+    def test_get_gateway_bridge_via_config(self, app):
+        with app.app_context():
+            app.config["WHATSAPP_MODE"] = "bridge"
+            gw = get_gateway()
+            assert isinstance(gw, BridgeWhatsAppGateway)
+
+    def test_get_gateway_setting_overrides_config(self, app):
+        with app.app_context():
+            app.config["WHATSAPP_MODE"] = "mock"
+            set_setting("wa_mode", "bridge")
             gw = get_gateway()
             assert isinstance(gw, BridgeWhatsAppGateway)
 

@@ -321,7 +321,12 @@ class BridgeWhatsAppGateway(WhatsAppGateway):
 
 
 def get_gateway() -> WhatsAppGateway:
-    return BridgeWhatsAppGateway()
+    mode = (get_setting("wa_mode", "") or "").strip().lower()
+    if not mode:
+        mode = str(current_app.config.get("WHATSAPP_MODE", "mock") or "mock").strip().lower()
+    if mode == "bridge":
+        return BridgeWhatsAppGateway()
+    return MockWhatsAppGateway()
 
 
 def check_whatsapp_number_registered(phone: str) -> tuple[bool | None, str]:
