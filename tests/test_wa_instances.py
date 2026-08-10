@@ -13,6 +13,7 @@ from app.services.whatsapp import (
     create_wa_instance,
     delete_wa_instance,
     list_wa_instances,
+    request_wa_pairing_code,
     wa_instance_qr_embed_url,
 )
 
@@ -170,6 +171,66 @@ class TestWaInstanceQrEmbedUrl:
     def test_builds_cache_busted_url(self):
         url = wa_instance_qr_embed_url("http://localhost:3000", "cs-2-ab12")
         assert url.startswith("http://localhost:3000/instances/cs-2-ab12/qr?t=")
+
+
+class TestRequestWaPairingCode:
+    def test_invalid_phone(self, app):
+        with app.app_context():
+            ok, status, code = request_wa_pairing_code("abc")
+            assert ok is False
+            assert status == "invalid-phone"
+            assert code is None
+
+    def test_no_bridge(self, app):
+        with app.app_context():
+            with patch("app.services.whatsapp.discover_bridge_base_url", return_value=""):
+                ok, status, code = request_wa_pairing_code("6281234567890")
+                assert ok is False
+                assert status == "bridge-not-found"
+                assert code is None
+
+    def test_success(self, app):
+        with app.app_context():
+            body = '{"ok": true, "pairing_code": "ABCD-1234"}'
+            with patch("app.services.whatsapp.discover_bridge_base_url", return_value="http://localhost:3000"), \
+                 patch("app.services.whatsapp.request.urlopen", return_value=_resp(body=body)):
+                ok, status, code = request_wa_pairing_code("6281234567890", "cs-2-ab12")
+                assert ok is True
+                assert status == "ok"
+                assert code == "ABCD-1234"
+
+    def test_body_not_ok(self, app):
+        with app.app_context():
+            body = '{"ok": false, "error": "already_connected"}'
+            with patch("app.services.whatsapp.discover_bridge_base_url", return_value="http://localhost:3000"), \
+                 patch("app.services.whatsapp.request.urlopen", return_value=_resp(body=body)):
+                ok, status, code = request_wa_pairing_code("6281234567890")
+                assert ok is False
+                assert status == "already_connected"
+                assert code is None
+
+    def test_http_error(self, app):
+        with app.app_context():
+            http_error = error.HTTPError(
+                url="http://localhost:3000/instances/default/pair", code=409,
+                msg="Conflict", hdrs=None, fp=None,
+            )
+            http_error.read = MagicMock(return_value=b'{"ok": false, "error": "already_connected"}')
+            with patch("app.services.whatsapp.discover_bridge_base_url", return_value="http://localhost:3000"), \
+                 patch("app.services.whatsapp.request.urlopen", side_effect=http_error):
+                ok, status, code = request_wa_pairing_code("6281234567890")
+                assert ok is False
+                assert status == "already_connected"
+                assert code is None
+
+    def test_generic_exception(self, app):
+        with app.app_context():
+            with patch("app.services.whatsapp.discover_bridge_base_url", return_value="http://localhost:3000"), \
+                 patch("app.services.whatsapp.request.urlopen", side_effect=Exception("net")):
+                ok, status, code = request_wa_pairing_code("6281234567890")
+                assert ok is False
+                assert status == "bridge-error"
+                assert code is None
 
 
 class TestSettingsWaNumberActions:

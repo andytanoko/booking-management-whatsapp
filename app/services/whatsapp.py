@@ -321,9 +321,7 @@ class BridgeWhatsAppGateway(WhatsAppGateway):
 
 
 def get_gateway() -> WhatsAppGateway:
-    mode = (get_setting("wa_mode", "") or "").strip().lower()
-    if not mode:
-        mode = str(current_app.config.get("WHATSAPP_MODE", "mock") or "mock").strip().lower()
+    mode = str(current_app.config.get("WHATSAPP_MODE", "mock") or "mock").strip().lower()
     if mode == "bridge":
         return BridgeWhatsAppGateway()
     return MockWhatsAppGateway()
@@ -451,6 +449,42 @@ def delete_wa_instance(instance_id: str) -> tuple[bool, str]:
         return False, f"bridge-http-{exc.code}"
     except Exception:
         return False, "bridge-error"
+
+
+def request_wa_pairing_code(phone: str, instance_id: str = "default") -> tuple[bool, str, str | None]:
+    """Request a WhatsApp "Link with phone number" pairing code for an instance.
+
+    Returns (ok, status, pairing_code). The code is entered in WhatsApp under
+    Settings > Linked devices > Link with phone number as an alternative to
+    scanning the QR.
+    """
+    normalized = normalize_whatsapp_number(phone)
+    if not normalized:
+        return False, "invalid-phone", None
+
+    base_url = discover_bridge_base_url()
+    if not base_url:
+        return False, "bridge-not-found", None
+
+    target = (instance_id or "default").strip() or "default"
+    raw = json.dumps({"phone": normalized}).encode("utf-8")
+    endpoint = f"{base_url.rstrip('/')}/instances/{target}/pair"
+    req = request.Request(endpoint, data=raw, method="POST")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with request.urlopen(req, timeout=15) as response:
+            body = json.loads(response.read().decode("utf-8", errors="ignore") or "{}")
+            if body.get("ok"):
+                return True, "ok", str(body.get("pairing_code") or "") or None
+            return False, str(body.get("error") or "pair-failed"), None
+    except error.HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode("utf-8", errors="ignore") or "{}")
+            return False, str(body.get("error") or f"bridge-http-{exc.code}"), None
+        except Exception:
+            return False, f"bridge-http-{exc.code}", None
+    except Exception:
+        return False, "bridge-error", None
 
 
 def wa_instance_qr_embed_url(instance_id: str, maybe_instance_id: str | None = None) -> str:

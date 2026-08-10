@@ -60,12 +60,12 @@ class TestGetGateway:
             gw = get_gateway()
             assert isinstance(gw, BridgeWhatsAppGateway)
 
-    def test_get_gateway_setting_overrides_config(self, app):
+    def test_get_gateway_ignores_db_setting(self, app):
         with app.app_context():
             app.config["WHATSAPP_MODE"] = "mock"
             set_setting("wa_mode", "bridge")
             gw = get_gateway()
-            assert isinstance(gw, BridgeWhatsAppGateway)
+            assert isinstance(gw, MockWhatsAppGateway)
 
 
 class TestRequestJson:

@@ -219,6 +219,21 @@ def manage_settings():
                         message = 'Nomor WhatsApp berhasil dihapus'
                     else:
                         error = f'Gagal menghapus nomor WhatsApp: {status}'
+            elif action == 'wa_number_pair':
+                instance_id = request.form.get('instance_id', '').strip() or 'default'
+                phone = request.form.get('pair_phone', '').strip()
+                if not phone:
+                    error = 'Nomor WhatsApp wajib diisi untuk mendapatkan kode pairing'
+                else:
+                    from app import app as app_module
+
+                    ok, status, pairing_code = app_module.request_wa_pairing_code(phone, instance_id)
+                    if ok and pairing_code:
+                        db.session.add(AuditLog(actor_user_id=current_user.id, action='whatsapp.instance.pair', details=f'instance_id={instance_id} phone={phone}'))
+                        db.session.commit()
+                        message = f"Kode pairing untuk {phone}: {pairing_code}. Buka WhatsApp > Perangkat tertaut > Tautkan dengan nomor telepon, lalu masukkan kode ini."
+                    else:
+                        error = f'Gagal membuat kode pairing: {status}'
 
         settings_map = get_many(setting_keys)
         if not settings_map.get('daily_capacity'):

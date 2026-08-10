@@ -231,7 +231,14 @@ function resetServiceForm() {
               {% if inst.connected %}
               -
               {% else %}
-              Menunggu QR...
+              <form method="post" class="inline-form pair-form">
+                <input type="hidden" name="instance_id" value="{{ inst.id }}" />
+                <input type="text" name="pair_phone" placeholder="62812xxxx" required class="pair-input" />
+                <button type="submit" name="action" value="wa_number_pair" class="btn-small">{{ icon('link') }} Kode</button>
+              </form>
+              {% if inst.pairing_code %}
+              <div class="pairing-code"><code>{{ inst.pairing_code }}</code></div>
+              {% endif %}
               {% endif %}
             </td>
             <td>

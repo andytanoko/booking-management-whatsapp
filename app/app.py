@@ -29,6 +29,7 @@ from app.services.whatsapp import (
     fetch_whatsapp_contacts,
     list_wa_instances as _list_wa_instances,
     normalize_whatsapp_number,
+    request_wa_pairing_code as _request_wa_pairing_code,
     send_and_log_message as _send_and_log_message,
     wa_instance_qr_embed_url as _wa_instance_qr_embed_url,
 )
@@ -277,6 +278,10 @@ def create_wa_instance(label: str):
 
 def delete_wa_instance(instance_id: str):
     return _delete_wa_instance(instance_id)
+
+
+def request_wa_pairing_code(phone: str, instance_id: str = "default"):
+    return _request_wa_pairing_code(phone, instance_id)
 
 
 def wa_instance_qr_embed_url(base_or_instance: str, maybe_instance_id: str | None = None) -> str:
