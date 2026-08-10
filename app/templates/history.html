@@ -43,6 +43,23 @@
       </tbody>
     </table>
   </div>
+  {% if bookings_pagination and bookings_pagination.pages > 1 %}
+  <div class="pager">
+    {% if bookings_pagination.has_prev %}
+    <a class="btn-secondary" href="{{ url_for('history', page=bookings_pagination.prev_num) }}">Sebelumnya</a>
+    {% else %}
+    <span class="btn-secondary disabled">Sebelumnya</span>
+    {% endif %}
+
+    <span class="pager-info">Halaman {{ bookings_pagination.page }} dari {{ bookings_pagination.pages }}</span>
+
+    {% if bookings_pagination.has_next %}
+    <a class="btn-secondary" href="{{ url_for('history', page=bookings_pagination.next_num) }}">Berikutnya</a>
+    {% else %}
+    <span class="btn-secondary disabled">Berikutnya</span>
+    {% endif %}
+  </div>
+  {% endif %}
 </section>
 {% else %}
 <section class="card">

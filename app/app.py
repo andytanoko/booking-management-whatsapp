@@ -1,10 +1,13 @@
 import json
+import os
 import re
+import secrets
 import time
 from datetime import datetime
 
 from flask import Flask, Response, current_app, jsonify, redirect, render_template, request, session, url_for
 from flask_login import LoginManager, current_user, login_user as flask_login_user
+from flask_migrate import Migrate
 from sqlalchemy.exc import IntegrityError
 
 from app.blueprints.auth import auth_bp
@@ -42,6 +45,9 @@ from app.blueprints.settings import (
 )
 
 
+migrate = Migrate()
+
+
 BOOKING_STATUSES = {
     'baru': 'Baru',
     'dikonfirmasi': 'Dikonfirmasi',
@@ -58,14 +64,21 @@ BOOKING_STATUSES = {
 DEFAULT_BOOKING_DONE_TEMPLATE = (
     'Halo {nama}, kabar baik! Kendaraan Anda untuk layanan *{layanan}* '
     'sudah *selesai* dikerjakan dan siap diambil. '
-    'Terima kasih telah mempercayakan kendaraan Anda kepada kami.'
+    'Nomor polisi: *{nomor_polisi}*. Terima kasih telah mempercayakan kendaraan Anda kepada kami.'
 )
 
 DEFAULT_RESCHEDULE_TEMPLATE = (
     'Halo {nama}, kami terima permintaan reschedule untuk *{layanan}*. '
     'Jadwal awal: {tanggal_lama} -> Jadwal baru: {tanggal_baru}. '
-    'Apakah sudah tepat? Silakan konfirmasi ya.'
+    'Nomor polisi: *{nomor_polisi}*. Apakah sudah tepat? Silakan konfirmasi ya.'
 )
+
+
+def _normalize_police_placeholder(template: str) -> str:
+    normalized = (template or '').replace('{nomor_kendaraan}', '{nomor_polisi}')
+    if '{nomor_polisi}' in normalized:
+        return normalized
+    return f"{normalized.rstrip()} Nomor polisi: *{{nomor_polisi}}*."
 
 parse_booking_form = MessageService.parse_booking_form
 parse_schedule_text = MessageService.parse_date
@@ -183,12 +196,15 @@ def build_message_view(msg: WhatsAppMessage) -> dict:
 
 def bootstrap_defaults() -> None:
     default_users = [
-        ('admin', 'admin123', 'admin'),
-        ('cs1', 'cs123', 'cs'),
-        ('tech1', 'tech123', 'technician'),
+        ('admin', 'SEED_ADMIN_PASSWORD', 'admin'),
     ]
-    for username, password, role in default_users:
+    for username, password_env, role in default_users:
         if User.query.filter_by(username=username).first() is None:
+            password = str(os.getenv(password_env, '')).strip()
+            if not password:
+                # Do not use a hardcoded fallback. Generate a one-time random password
+                # to avoid predictable credentials when env vars are not configured.
+                password = secrets.token_urlsafe(18)
             user = User(username=username, role=role, active=True)
             user.set_password(password)
             db.session.add(user)
@@ -287,20 +303,28 @@ def booking_notify_target(customer: Customer | None) -> str:
 
 def booking_done_message(booking: Booking) -> str:
     template = get_setting('booking_done_template', DEFAULT_BOOKING_DONE_TEMPLATE) or DEFAULT_BOOKING_DONE_TEMPLATE
+    template = _normalize_police_placeholder(template)
+    nomor_polisi = booking.license_plate or booking.vehicle_type or '-'
     return (
         template.replace('{nama}', booking.customer.name if booking.customer else 'Kak')
         .replace('{layanan}', booking.service_type.name if booking.service_type else 'layanan')
         .replace('{tanggal}', booking.scheduled_start.strftime('%d-%m-%Y') if booking.scheduled_start else '-')
+        .replace('{nomor_polisi}', nomor_polisi)
+        .replace('{nomor_kendaraan}', nomor_polisi)
     )
 
 
 def booking_reschedule_message(booking: Booking, new_scheduled_start: datetime | None) -> str:
     template = get_setting('reschedule_template', DEFAULT_RESCHEDULE_TEMPLATE) or DEFAULT_RESCHEDULE_TEMPLATE
+    template = _normalize_police_placeholder(template)
+    nomor_polisi = booking.license_plate or booking.vehicle_type or '-'
     return (
         template.replace('{nama}', booking.customer.name if booking.customer else 'Kak')
         .replace('{layanan}', booking.service_type.name if booking.service_type else 'layanan')
         .replace('{tanggal_lama}', booking.scheduled_start.strftime('%d-%m-%Y') if booking.scheduled_start else '-')
         .replace('{tanggal_baru}', new_scheduled_start.strftime('%d-%m-%Y') if new_scheduled_start else '-')
+        .replace('{nomor_polisi}', nomor_polisi)
+        .replace('{nomor_kendaraan}', nomor_polisi)
     )
 
 
@@ -309,10 +333,13 @@ def create_app():
     app.config.from_object('config.Config')
 
     db.init_app(app)
+    migrate.init_app(app, db)
 
-    with app.app_context():
-        db.create_all()
+    @app.cli.command('seed-defaults')
+    def seed_defaults_command():
+        """Seed default users and services (idempotent)."""
         bootstrap_defaults()
+        print('Default users/services seeded.')
 
     login_manager = LoginManager()
     login_manager.login_view = 'auth.login'
@@ -413,6 +440,8 @@ def create_app():
 
         message = request.args.get('sync_ok')
         error = request.args.get('sync_error')
+        page = request.args.get('page', 1, type=int)
+        per_page = 20
 
         if request.method == 'POST':
             action = request.form.get('action', 'create').strip()
@@ -468,7 +497,11 @@ def create_app():
         if search:
             like = f'%{search}%'
             query = query.filter(db.or_(Customer.name.ilike(like), Customer.phone.ilike(like)))
-        contacts = query.order_by(Customer.created_at.desc()).all()
+        contacts_pagination = (
+            query
+            .order_by(db.func.lower(Customer.name).asc(), Customer.created_at.desc())
+            .paginate(page=page, per_page=per_page, error_out=False)
+        )
         booking_counts = {
             customer_id: count
             for customer_id, count in db.session.query(Booking.customer_id, db.func.count(Booking.id)).group_by(Booking.customer_id).all()
@@ -476,7 +509,8 @@ def create_app():
 
         return render_template(
             'customers.html',
-            contacts=contacts,
+            contacts=contacts_pagination.items,
+            contacts_pagination=contacts_pagination,
             booking_counts=booking_counts,
             search=search,
             message=message,
@@ -624,7 +658,16 @@ def create_app():
         if guard:
             return guard
 
-        bookings = Booking.query.filter(Booking.status.in_(['cancel', 'batal', 'selesai'])).order_by(Booking.scheduled_start.asc()).all()
+        page = request.args.get('page', 1, type=int)
+        per_page = 20
+
+        bookings_pagination = (
+            Booking.query
+            .filter(Booking.status.in_(['cancel', 'batal', 'selesai']))
+            .order_by(Booking.scheduled_start.desc())
+            .paginate(page=page, per_page=per_page, error_out=False)
+        )
+        bookings = bookings_pagination.items
         maintenance_bookings = Booking.query.join(ServiceType).filter(ServiceType.name == 'Maintenance', Booking.status == 'selesai').order_by(Booking.scheduled_start.desc()).all()
         maintenance_by_key = {}
         for maintenance_booking in maintenance_bookings:
@@ -643,7 +686,14 @@ def create_app():
                         'last_service': latest.service_type.name,
                     }
 
-        return render_template('history.html', bookings=bookings, statuses=BOOKING_STATUSES, maintenance_stats=maintenance_stats, partial=wants_partial())
+        return render_template(
+            'history.html',
+            bookings=bookings,
+            bookings_pagination=bookings_pagination,
+            statuses=BOOKING_STATUSES,
+            maintenance_stats=maintenance_stats,
+            partial=wants_partial(),
+        )
 
     @app.route('/whatsapp-followups', methods=['GET'])
     def whatsapp_followups():

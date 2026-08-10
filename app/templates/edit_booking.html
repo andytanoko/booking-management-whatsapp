@@ -49,6 +49,10 @@
     <label>Catatan
       <input type="text" name="notes" value="{{ booking.notes or '' }}" />
     </label>
+
+    <label>Harga
+      <input type="text" name="price_amount" placeholder="Contoh: 1500000 atau Rp 1.500.000" value="{{ booking.price_amount if booking.price_amount is not none else '' }}" />
+    </label>
     
     <div class="form-actions full-col">
       <button type="submit" class="btn-primary">{{ icon('save') }} Simpan Perubahan</button>
@@ -69,6 +73,7 @@
     <div>
       <p><strong>Jadwal Selesai (Otomatis):</strong> {{ booking.scheduled_end.strftime('%d-%m-%Y') }}</p>
       <p><strong>Durasi Layanan:</strong> {{ booking.service_type.duration_minutes }} menit</p>
+      <p><strong>Harga:</strong> {% if booking.price_amount is not none %}Rp {{ '{:,.0f}'.format(booking.price_amount|float).replace(',', '.') }}{% else %}-{% endif %}</p>
       {% if booking.assigned_technician %}
       <p><strong>Teknisi:</strong> {{ booking.assigned_technician.username }}</p>
       {% else %}

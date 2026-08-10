@@ -55,12 +55,12 @@
         <input type="hidden" name="action" value="send_reminder" />
         <input type="hidden" name="booking_id" value="{{ item.id }}" />
         <label>Jadwal Baru
-          <input type="date" name="new_scheduled_start" id="new-date-{{ item.id }}" required onchange="updateReminderMessage({{ item.id }})" data-old-date="{{ item.scheduled_start.strftime('%d-%m-%Y') }}" data-service="{{ item.service_type.name }}" data-name="{{ item.customer.name }}" />
+          <input type="date" name="new_scheduled_start" id="new-date-{{ item.id }}" required onchange="updateReminderMessage({{ item.id }})" data-old-date="{{ item.scheduled_start.strftime('%d-%m-%Y') }}" data-service="{{ item.service_type.name }}" data-name="{{ item.customer.name }}" data-license-plate="{{ item.license_plate or '-' }}" />
         </label>
         <label>Pesan Reminder
           <textarea name="message" rows="5" id="message-textarea-{{ item.id }}" data-original-message="{{ notify[item.id].message|e }}">{{ notify[item.id].message }}</textarea>
         </label>
-        <p class="hint">Placeholder: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_lama}</code>, <code>{tanggal_baru}</code></p>
+        <p class="hint">Placeholder: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_lama}</code>, <code>{tanggal_baru}</code>, <code>{nomor_polisi}</code></p>
         {% if notify[item.id].target %}
         <button type="submit" class="btn-primary">{{ icon('send') }} Konfirmasi dan Kirim Reminder ke {{ item.customer.name }}</button>
         {% else %}
@@ -143,8 +143,9 @@ function updateReminderMessage(bookingId) {
   const service = dateInput.dataset.service || 'layanan';
   const name = dateInput.dataset.name || 'Kak';
   const oldDate = dateInput.dataset.oldDate || '';
+  const nomorKendaraan = dateInput.dataset.licensePlate || '-';
 
-  const generatedMessage = `Halo ${name}, kami terima permintaan reschedule untuk *${service}*. Jadwal awal: ${oldDate} → Jadwal baru: ${formattedDate}. Apakah sudah tepat? Silakan konfirmasi ya.`;
+  const generatedMessage = `Halo ${name}, kami terima permintaan reschedule untuk *${service}*. Jadwal awal: ${oldDate} → Jadwal baru: ${formattedDate}. Nomor polisi: *${nomorKendaraan}*. Apakah sudah tepat? Silakan konfirmasi ya.`;
   messageArea.value = generatedMessage;
 }
 

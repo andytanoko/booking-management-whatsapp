@@ -22,20 +22,20 @@ MAINTENANCE_SERVICE_NAME = 'Maintenance'
 VALID_AFTER_SERVICE_VALUES = {'', 'Maintenance'}
 DEFAULT_BOOKING_DONE_TEMPLATE = (
     'Halo {nama}, kabar baik! Kendaraan Anda untuk layanan *{layanan}* '
-    'sudah *selesai* dikerjakan dan siap diambil. Terima kasih 🙏'
+    'sudah *selesai* dikerjakan dan siap diambil. Nomor polisi: *{nomor_polisi}*. Terima kasih 🙏'
 )
 DEFAULT_RESCHEDULE_TEMPLATE = (
     'Halo {nama}, kami terima permintaan reschedule untuk *{layanan}*. '
     'Jadwal awal: {tanggal_lama} -> Jadwal baru: {tanggal_baru}. '
-    'Apakah sudah tepat? Silakan konfirmasi ya.'
+    'Nomor polisi: *{nomor_polisi}*. Apakah sudah tepat? Silakan konfirmasi ya.'
 )
 DEFAULT_MAINTENANCE_REMINDER_TEMPLATE = (
     'Halo {nama}, sudah 6 bulan sejak layanan *{layanan}* kami selesaikan ({tanggal_selesai}). '
-    'Kami rekomendasikan maintenance sekarang. Hubungi kami untuk booking ya 😊'
+    'Nomor polisi: *{nomor_polisi}*. Kami rekomendasikan maintenance sekarang. Hubungi kami untuk booking ya 😊'
 )
 DEFAULT_REVIEW_REQUEST_TEMPLATE = (
     'Halo {nama}, terima kasih telah menggunakan layanan *{layanan}* kami! '
-    'Bantu kami berkembang dengan memberikan review di Google Maps: {link_review} 🙏'
+    'Nomor polisi: *{nomor_polisi}*. Bantu kami berkembang dengan memberikan review di Google Maps: {link_review} 🙏'
 )
 
 # All message templates that CS/admin can edit from the Template page.
@@ -46,6 +46,25 @@ TEMPLATE_DEFAULTS = {
     'maintenance_reminder_template': DEFAULT_MAINTENANCE_REMINDER_TEMPLATE,
     'review_request_template': DEFAULT_REVIEW_REQUEST_TEMPLATE,
 }
+
+TEMPLATE_REQUIRED_PLACEHOLDERS = {
+    key: {'{nomor_polisi}'} for key in TEMPLATE_DEFAULTS.keys()
+}
+
+
+def _booking_police_number(booking: Booking | None) -> str:
+    if booking and booking.license_plate:
+        return booking.license_plate
+    if booking and booking.vehicle_type:
+        return booking.vehicle_type
+    return '-'
+
+
+def _ensure_police_placeholder(template: str) -> str:
+    normalized = (template or '').replace('{nomor_kendaraan}', '{nomor_polisi}')
+    if '{nomor_polisi}' in normalized:
+        return normalized
+    return f"{normalized.rstrip()} Nomor polisi: *{{nomor_polisi}}*."
 
 
 def _authorized(*roles: str) -> bool:
@@ -256,21 +275,37 @@ def manage_templates():
     template_keys = list(TEMPLATE_DEFAULTS.keys())
 
     if request.method == 'POST':
+        has_change = False
         for key in template_keys:
+            if key not in request.form:
+                continue
             value = request.form.get(key, '').strip()
             if value:
+                missing = [ph for ph in TEMPLATE_REQUIRED_PLACEHOLDERS.get(key, set()) if ph not in value]
+                if missing:
+                    error = f"Template harus menyertakan placeholder: {', '.join(missing)}"
+                    break
+                value = _ensure_police_placeholder(value)
                 set_setting(key, value)
-        review_url = request.form.get('google_maps_business_url', '').strip()
-        if review_url:
-            set_setting('google_maps_business_url', review_url)
-        db.session.add(AuditLog(actor_user_id=current_user.id, action='settings.templates.update', details='templates'))
-        db.session.commit()
-        message = 'Template berhasil disimpan'
+                has_change = True
+        if not error:
+            review_url = request.form.get('google_maps_business_url', '').strip()
+            if review_url:
+                set_setting('google_maps_business_url', review_url)
+                has_change = True
+            if has_change:
+                db.session.add(AuditLog(actor_user_id=current_user.id, action='settings.templates.update', details='templates'))
+                db.session.commit()
+                message = 'Template berhasil disimpan'
+            else:
+                error = 'Tidak ada perubahan template yang disimpan'
 
     settings_map = get_many(template_keys + ['google_maps_business_url'])
     for key, default in TEMPLATE_DEFAULTS.items():
-        if not settings_map.get(key):
-            settings_map[key] = get_setting(key, default)
+        current_value = settings_map.get(key)
+        if not current_value:
+            current_value = get_setting(key, default)
+        settings_map[key] = _ensure_police_placeholder(current_value)
 
     return render_template(
         'templates.html',
@@ -370,12 +405,15 @@ def maintenance():
     reminders = MaintenanceReminder.query.join(Booking).order_by(MaintenanceReminder.maintenance_due_at.asc()).all()
     reminder_template = get_setting('maintenance_reminder_template', DEFAULT_MAINTENANCE_REMINDER_TEMPLATE)
     review_template = get_setting('review_request_template', DEFAULT_REVIEW_REQUEST_TEMPLATE)
+    reminder_template = _ensure_police_placeholder(reminder_template)
+    review_template = _ensure_police_placeholder(review_template)
     review_link = get_setting('google_maps_business_url', '')
     drafts = {}
     for reminder in reminders:
+        nomor_polisi = _booking_police_number(reminder.booking)
         drafts[reminder.id] = {
-            'reminder_message': reminder_template.format(nama=reminder.customer.name, layanan=reminder.service_type, tanggal_selesai=reminder.completed_at.strftime('%d-%m-%Y')),
-            'review_message': review_template.format(nama=reminder.customer.name, layanan=reminder.service_type, link_review=review_link),
+            'reminder_message': reminder_template.format(nama=reminder.customer.name, layanan=reminder.service_type, tanggal_selesai=reminder.completed_at.strftime('%d-%m-%Y'), nomor_polisi=nomor_polisi, nomor_kendaraan=nomor_polisi),
+            'review_message': review_template.format(nama=reminder.customer.name, layanan=reminder.service_type, link_review=review_link, nomor_polisi=nomor_polisi, nomor_kendaraan=nomor_polisi),
         }
 
     return render_template('maintenance.html', reminders=reminders, drafts=drafts, message=message, error=error, now=datetime.utcnow(), partial=wants_partial())

@@ -60,4 +60,9 @@ fi
 # 5. Launch the app.
 echo "Starting app on http://0.0.0.0:${PORT} ..."
 export PORT
+export FLASK_APP=wsgi:app
+echo "Running database migrations..."
+flask db upgrade
+echo "Seeding default users/services..."
+flask seed-defaults
 exec python -m app.app

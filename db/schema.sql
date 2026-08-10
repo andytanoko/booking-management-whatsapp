@@ -52,10 +52,14 @@ CREATE TABLE IF NOT EXISTS booking (
     other_info VARCHAR(255),                   -- Package name, e.g. "Large Gold"
     vehicle_type VARCHAR(100),                 -- e.g. "Toyota Rush GR"
     license_plate VARCHAR(20),                 -- e.g. "B1234XYZ"
+    price_amount NUMERIC(12,2),                -- Harga booking
     created_by_user_id INTEGER REFERENCES "user"(id),
     assigned_tech_id INTEGER REFERENCES "user"(id),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE booking
+    ADD COLUMN IF NOT EXISTS price_amount NUMERIC(12,2);
 
 CREATE TABLE IF NOT EXISTS whats_app_message (
     id SERIAL PRIMARY KEY,

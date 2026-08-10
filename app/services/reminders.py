@@ -22,7 +22,7 @@ REMINDER_RULES = {
 # Default template for automatic pre-appointment reminders; configurable in Settings.
 DEFAULT_APPOINTMENT_REMINDER_TEMPLATE = (
     'Halo {nama}, mengingatkan booking *{layanan}* Anda dijadwalkan pada '
-    '{tanggal}. Sampai jumpa ya! 🙏'
+    '{tanggal}. Nomor polisi: *{nomor_polisi}*. Sampai jumpa ya! 🙏'
 )
 
 # Default dispatch window for scheduler jitter tolerance (minutes)
@@ -98,11 +98,17 @@ class ReminderService:
             Formatted message text
         """
         template = get_setting('appointment_reminder_template', DEFAULT_APPOINTMENT_REMINDER_TEMPLATE) or DEFAULT_APPOINTMENT_REMINDER_TEMPLATE
+        template = template.replace('{nomor_kendaraan}', '{nomor_polisi}')
+        if '{nomor_polisi}' not in template:
+            template = f"{template.rstrip()} Nomor polisi: *{{nomor_polisi}}*."
         scheduled = booking.scheduled_start
+        nomor_polisi = booking.license_plate or booking.vehicle_type or '-'
         return (
             template.replace('{nama}', booking.customer.name if booking.customer else 'Kak')
             .replace('{layanan}', booking.service_type.name if booking.service_type else 'layanan')
             .replace('{tanggal}', scheduled.strftime('%d-%m-%Y') if scheduled else '-')
+            .replace('{nomor_polisi}', nomor_polisi)
+            .replace('{nomor_kendaraan}', nomor_polisi)
         )
 
     def send_reminder(

@@ -25,6 +25,9 @@ fi
 echo "Starting test dependencies..."
 "${COMPOSE[@]}" up -d db
 
+echo "Rebuilding web image (ensure dependencies are up to date)..."
+"${COMPOSE[@]}" build web
+
 echo ""
 echo "Running tests in the web container..."
 echo "================================"

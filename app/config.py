@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 
 logger = logging.getLogger(__name__)
 
-_SECRET_KEY_DEFAULT = "dev-secret"
-_SECRET_KEY = os.getenv("SECRET_KEY", _SECRET_KEY_DEFAULT)
-if _SECRET_KEY == _SECRET_KEY_DEFAULT:
-    # Signs session cookies - a known, hardcoded value lets anyone forge sessions.
+_SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+if not _SECRET_KEY:
+    # Signs session cookies. Do not use a known static fallback value.
+    _SECRET_KEY = secrets.token_urlsafe(48)
     logger.warning(
-        "SECRET_KEY is not set - using the insecure default. Set SECRET_KEY "
-        "before deploying to production."
+        "SECRET_KEY is not set - using an ephemeral key for this process only. "
+        "Set SECRET_KEY before deploying to production."
     )
 
 

@@ -462,6 +462,29 @@ button.btn-danger {
   overflow-x: auto;
 }
 
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.pager .btn-secondary {
+  padding: 8px 12px;
+}
+
+.pager .disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.pager-info {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .stream-status {
   display: inline-block;
   margin-left: 8px;

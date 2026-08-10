@@ -41,11 +41,11 @@ def settings():
     ...
 ```
 
-## Default accounts (from README quick start)
+## Bootstrap accounts
 
-- `admin` / `admin123`
-- `cs1` / `cs123`
-- `tech1` / `tech123`
+- Hanya `admin` yang dibuat saat startup bila belum ada.
+- Password admin diambil dari env `SEED_ADMIN_PASSWORD`.
+- Tanpa env tersebut, sistem membuat password acak untuk mencegah kredensial default hardcoded.
 
 ## Managing users
 

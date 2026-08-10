@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, current_app, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
@@ -26,7 +27,7 @@ BOOKING_STATUSES = {
 DEFAULT_BOOKING_DONE_TEMPLATE = (
     'Halo {nama}, kabar baik! Kendaraan Anda untuk layanan *{layanan}* '
     'sudah *selesai* dikerjakan dan siap diambil. '
-    'Terima kasih telah mempercayakan kendaraan Anda kepada kami 🙏'
+    'Nomor polisi: *{nomor_polisi}*. Terima kasih telah mempercayakan kendaraan Anda kepada kami 🙏'
 )
 
 
@@ -62,11 +63,35 @@ def _booking_notify_target(customer: Customer) -> str:
 
 def _booking_done_message(booking: Booking) -> str:
     template = get_setting('booking_done_template', DEFAULT_BOOKING_DONE_TEMPLATE) or DEFAULT_BOOKING_DONE_TEMPLATE
+    template = template.replace('{nomor_kendaraan}', '{nomor_polisi}')
+    if '{nomor_polisi}' not in template:
+        template = f"{template.rstrip()} Nomor polisi: *{{nomor_polisi}}*."
+    nomor_polisi = booking.license_plate or booking.vehicle_type or '-'
     return (
         template.replace('{nama}', booking.customer.name if booking.customer else 'Kak')
         .replace('{layanan}', booking.service_type.name if booking.service_type else 'layanan')
         .replace('{tanggal}', booking.scheduled_start.strftime('%d-%m-%Y') if booking.scheduled_start else '-')
+        .replace('{nomor_polisi}', nomor_polisi)
+        .replace('{nomor_kendaraan}', nomor_polisi)
     )
+
+
+def _parse_price_input(raw_value: str) -> tuple[Decimal | None, str]:
+    raw = (raw_value or '').strip()
+    if not raw:
+        return None, ''
+
+    normalized = raw.lower().replace('rp', '').replace(' ', '')
+    normalized = normalized.replace('.', '').replace(',', '.')
+    try:
+        value = Decimal(normalized)
+    except InvalidOperation:
+        return None, 'Format harga tidak valid'
+
+    if value < 0:
+        return None, 'Harga tidak boleh negatif'
+
+    return value.quantize(Decimal('0.01')), ''
 
 
 @bookings_bp.route('/bookings', methods=['GET', 'POST'])
@@ -77,12 +102,19 @@ def list_bookings():
 
     message = request.args.get('sync_ok')
     error = None
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
 
     def render_bookings(message_value, error_value):
-        data = Booking.query.filter(~Booking.status.in_(['cancel', 'batal', 'selesai'])).order_by(Booking.scheduled_start.asc()).all()
+        pagination = (
+            Booking.query
+            .filter(~Booking.status.in_(['cancel', 'batal', 'selesai']))
+            .order_by(Booking.scheduled_start.desc())
+            .paginate(page=page, per_page=per_page, error_out=False)
+        )
         services = ServiceType.query.filter_by(active=True).all()
         notify = {}
-        for booking in data:
+        for booking in pagination.items:
             if booking.status == 'selesai':
                 notify[booking.id] = {
                     'target': _booking_notify_target(booking.customer),
@@ -90,7 +122,8 @@ def list_bookings():
                 }
         return render_template(
             'bookings.html',
-            bookings=data,
+            bookings=pagination.items,
+            bookings_pagination=pagination,
             services=services,
             statuses=BOOKING_STATUSES,
             notify=notify,
@@ -191,7 +224,9 @@ def list_bookings():
         service_id = int(request.form.get('service_id', '0') or 0)
         package_name = request.form.get('package_name', '').strip()
         schedule_raw = request.form.get('scheduled_start', '').strip()
+        price_raw = request.form.get('price_amount', '').strip()
         notes = request.form.get('notes', '').strip()
+        price_amount = None
 
         service = None
         variant_info = None
@@ -235,6 +270,11 @@ def list_bookings():
             except ValueError:
                 error = 'Format tanggal tidak valid'
 
+        if not error:
+            price_amount, price_error = _parse_price_input(price_raw)
+            if price_error:
+                error = price_error
+
         if service and start_time and not error:
             end_time = compute_booking_end(service, start_time)
             if has_conflict(start_time, end_time):
@@ -263,6 +303,7 @@ def list_bookings():
                         other_info=package_name,
                         vehicle_type=vehicle_type,
                         license_plate=license_plate,
+                        price_amount=price_amount,
                         created_by_user_id=current_user.id,
                     )
                     db.session.add(booking)
@@ -297,7 +338,9 @@ def edit_booking(booking_id: int):
             service_id = int(request.form.get('service_id', '0') or 0)
             package_name = request.form.get('package_name', '').strip()
             schedule_raw = request.form.get('scheduled_start', '').strip()
+            price_raw = request.form.get('price_amount', '').strip()
             notes = request.form.get('notes', '').strip()
+            price_amount = None
 
             service = None
             variant_info = None
@@ -342,6 +385,11 @@ def edit_booking(booking_id: int):
                         error = 'Format tanggal tidak valid'
 
                     if not error:
+                        price_amount, price_error = _parse_price_input(price_raw)
+                        if price_error:
+                            error = price_error
+
+                    if not error:
                         end_time = compute_booking_end(service, start_time)
                         if has_conflict(start_time, end_time, exclude_booking_id=booking.id):
                             error = 'Jadwal bentrok dengan booking lain'
@@ -366,6 +414,7 @@ def edit_booking(booking_id: int):
                             booking.other_info = package_name
                             booking.vehicle_type = vehicle_type
                             booking.license_plate = license_plate
+                            booking.price_amount = price_amount
                             db.session.add(AuditLog(actor_user_id=current_user.id, action='booking.edit', details=f'booking_id={booking.id} customer={target_customer.phone} service={service.name}'))
                             db.session.commit()
                             message = 'Booking berhasil diperbarui'

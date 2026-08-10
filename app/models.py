@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional, Dict, Any, List
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -86,6 +87,7 @@ class Booking(db.Model):
     other_info: Optional[str] = db.Column(db.String(255), nullable=True)
     vehicle_type: Optional[str] = db.Column(db.String(100), nullable=True)
     license_plate: Optional[str] = db.Column(db.String(20), nullable=True)
+    price_amount: Optional[Decimal] = db.Column(db.Numeric(12, 2), nullable=True)
     created_by_user_id: Optional[int] = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     assigned_tech_id: Optional[int] = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     created_at: datetime = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
@@ -104,6 +106,7 @@ class Booking(db.Model):
             'status': self.status,
             'start': self.scheduled_start.isoformat(),
             'end': self.scheduled_end.isoformat(),
+            'price_amount': float(self.price_amount) if self.price_amount is not None else None,
             'vehicle': f"{self.vehicle_type} ({self.license_plate})" if self.vehicle_type else self.license_plate
         }
 

@@ -6,7 +6,7 @@
 
 <section class="card">
   <div class="card-header">{{ icon('edit') }}<h2>Template Pesan WhatsApp</h2></div>
-  <p>Semua pesan otomatis ke customer memakai template di bawah. CS &amp; Admin dapat mengubahnya. Gunakan placeholder yang tersedia; teks masih bisa diedit sebelum dikirim.</p>
+  <p>Semua pesan otomatis ke customer memakai template di bawah. CS &amp; Admin dapat mengubahnya. Gunakan placeholder yang tersedia; <b>semua template wajib menyertakan <code>{nomor_polisi}</code></b> agar kendaraan customer tidak tertukar.</p>
 </section>
 
 <section class="card">
@@ -16,7 +16,7 @@
     <label>Isi Template
       <textarea name="booking_done_template" rows="5">{{ settings.booking_done_template }}</textarea>
     </label>
-    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code></p>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code>, <code>{nomor_polisi}</code> (wajib)</p>
     <div class="form-actions">
       <button type="submit">{{ icon('save') }} Simpan Template</button>
     </div>
@@ -30,7 +30,7 @@
     <label>Isi Template
       <textarea name="reschedule_template" rows="5">{{ settings.reschedule_template }}</textarea>
     </label>
-    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_lama}</code>, <code>{tanggal_baru}</code></p>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_lama}</code>, <code>{tanggal_baru}</code>, <code>{nomor_polisi}</code> (wajib)</p>
     <div class="form-actions">
       <button type="submit">{{ icon('save') }} Simpan Template</button>
     </div>
@@ -44,7 +44,7 @@
     <label>Isi Template
       <textarea name="appointment_reminder_template" rows="5">{{ settings.appointment_reminder_template }}</textarea>
     </label>
-    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code></p>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal}</code>, <code>{nomor_polisi}</code> (wajib)</p>
     <div class="form-actions">
       <button type="submit">{{ icon('save') }} Simpan Template</button>
     </div>
@@ -58,7 +58,7 @@
     <label>Isi Template
       <textarea name="maintenance_reminder_template" rows="5">{{ settings.maintenance_reminder_template }}</textarea>
     </label>
-    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_selesai}</code></p>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{tanggal_selesai}</code>, <code>{nomor_polisi}</code> (wajib)</p>
     <div class="form-actions">
       <button type="submit">{{ icon('save') }} Simpan Template</button>
     </div>
@@ -72,7 +72,7 @@
     <label>Isi Template
       <textarea name="review_request_template" rows="5">{{ settings.review_request_template }}</textarea>
     </label>
-    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{link_review}</code></p>
+    <p class="hint">Placeholder tersedia: <code>{nama}</code>, <code>{layanan}</code>, <code>{link_review}</code>, <code>{nomor_polisi}</code> (wajib)</p>
     <label>URL Google Maps (untuk <code>{link_review}</code>)
       <input type="url" name="google_maps_business_url" placeholder="https://maps.app.goo.gl/..." value="{{ settings.google_maps_business_url or '' }}" />
     </label>

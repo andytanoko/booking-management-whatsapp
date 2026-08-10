@@ -7,17 +7,9 @@
 
 BEGIN;
 
--- Default first-run accounts (admin/admin123, cs1/cs123, tech1/tech123).
--- Same accounts app/app.py's seed_default_users() creates at every startup
--- (via the ORM, not this file) - keep both in sync if these ever change.
--- app/app.py lets these be overridden via SEED_ADMIN_PASSWORD/SEED_CS_PASSWORD/
--- SEED_TECH_PASSWORD env vars; this file always uses the hardcoded hashes below,
--- so only use it for local/dev setup, not production.
-INSERT INTO "user" (username, password_hash, role, active, created_at) VALUES
-  ('admin', 'pbkdf2:sha256:1000000$3gYIuAaeWfXXLWWK$b90f744128c62650736ba0d9b71caa98a177d9e65df5690679bd5d5c8d08a968', 'admin', true, CURRENT_TIMESTAMP),
-  ('cs1',   'pbkdf2:sha256:1000000$HZw6YjQheumKOKGl$7ada73d77aca89d50014f73d03656ba26c1b6170d28b1d2954656a5243c74a59', 'cs', true, CURRENT_TIMESTAMP),
-  ('tech1', 'pbkdf2:sha256:1000000$vD50zW2BvrvTrIr8$cba92e8d1bbe8b8596d0e3aab6048bfdc514650bddc06ab4d70bec876ee017df', 'technician', true, CURRENT_TIMESTAMP)
-ON CONFLICT (username) DO NOTHING;
+-- Default users are created by app bootstrap (app/app.py) using environment
+-- variables (SEED_ADMIN_PASSWORD / SEED_CS_PASSWORD / SEED_TECH_PASSWORD).
+-- Keep this SQL seed password-free to avoid hardcoded credentials.
 
 -- Default service catalog. after_service = "Maintenance" means completing that
 -- service creates a maintenance_reminder (booking later routes to /maintenance

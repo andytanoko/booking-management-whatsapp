@@ -36,6 +36,9 @@
     <label>Catatan
       <input type="text" name="notes" value="{{ request.form.get('notes', '') if error else '' }}" />
     </label>
+    <label>Harga
+      <input type="text" name="price_amount" value="{{ request.form.get('price_amount', '') if error else '' }}" placeholder="Contoh: 1500000 atau Rp 1.500.000" />
+    </label>
     <div class="form-actions">
       <button type="submit">{{ icon('save') }} Simpan Booking</button>
     </div>
@@ -53,6 +56,7 @@
           <th>Layanan</th>
           <th>Jenis Kendaraan</th>
           <th>Nomor Polisi</th>
+          <th>Harga</th>
           <th>Other Info</th>
           <th>Mulai</th>
           <th>Selesai</th>
@@ -69,6 +73,7 @@
           <td>{{ item.service_type.name }}</td>
           <td>{{ item.vehicle_type or '-' }}</td>
           <td>{{ item.license_plate or '-' }}</td>
+          <td>{% if item.price_amount is not none %}Rp {{ '{:,.0f}'.format(item.price_amount|float).replace(',', '.') }}{% else %}-{% endif %}</td>
           <td>{{ item.other_info or '-' }}</td>
           <td>{{ item.scheduled_start.strftime('%d-%m-%Y') }}</td>
           <td>{{ item.scheduled_end.strftime('%d-%m-%Y') }}</td>
@@ -132,6 +137,23 @@
       </tbody>
     </table>
   </div>
+  {% if bookings_pagination and bookings_pagination.pages > 1 %}
+  <div class="pager">
+    {% if bookings_pagination.has_prev %}
+    <a class="btn-secondary" href="{{ url_for('bookings.list_bookings', page=bookings_pagination.prev_num, customer_name=request.args.get('customer_name', ''), phone=request.args.get('phone', '')) }}">Sebelumnya</a>
+    {% else %}
+    <span class="btn-secondary disabled">Sebelumnya</span>
+    {% endif %}
+
+    <span class="pager-info">Halaman {{ bookings_pagination.page }} dari {{ bookings_pagination.pages }}</span>
+
+    {% if bookings_pagination.has_next %}
+    <a class="btn-secondary" href="{{ url_for('bookings.list_bookings', page=bookings_pagination.next_num, customer_name=request.args.get('customer_name', ''), phone=request.args.get('phone', '')) }}">Berikutnya</a>
+    {% else %}
+    <span class="btn-secondary disabled">Berikutnya</span>
+    {% endif %}
+  </div>
+  {% endif %}
 </section>
 
 {% endblock %}

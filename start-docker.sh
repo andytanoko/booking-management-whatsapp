@@ -69,9 +69,9 @@ ARGS=(up)
 [ "$BUILD" -eq 1 ] && ARGS+=(--build)
 [ "$DETACH" -eq 1 ] && ARGS+=(-d)
 
-# Needed on machines behind a corporate TLS-intercepting proxy (e.g. Netskope),
-# where Chromium in wa-bridge otherwise fails QR generation with ERR_CERT_AUTHORITY_INVALID.
-export WA_BRIDGE_IGNORE_CERT_ERRORS=true
+# Optional override for corporate TLS-intercepting proxies (e.g. Netskope).
+# Keep secure default disabled unless explicitly enabled by environment.
+export WA_BRIDGE_IGNORE_CERT_ERRORS="${WA_BRIDGE_IGNORE_CERT_ERRORS:-false}"
 # Required on Podman: ensures .dockerignore is applied before stat-ing build context files.
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1

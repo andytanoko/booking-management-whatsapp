@@ -40,10 +40,10 @@ python -m app.app
 
 Akses: http://localhost:5000
 
-Akun default:
-- admin / admin123
-- cs1 / cs123
-- tech1 / tech123
+Akun bootstrap:
+- Hanya `admin` yang dibuat otomatis saat startup jika belum ada.
+- Password admin diambil dari env: `SEED_ADMIN_PASSWORD`.
+- Jika env password tidak diisi, sistem membuat password acak satu kali (tidak hardcoded).
 
 ## 4) Quick Start (Docker)
 
@@ -105,3 +105,29 @@ Catatan: aplikasi ini menampilkan QR dari service bridge. Aplikasi tidak mengimp
 - Tambah retry queue untuk pengiriman WA gagal
 - Migrasi DB ke PostgreSQL untuk production
 - Migrasi gateway dari QR ke WhatsApp Business API saat siap produksi
+
+## 8) Database Migration Workflow (Best Practice)
+
+Project ini sekarang memakai Flask-Migrate (Alembic) untuk perubahan skema DB.
+
+Perintah utama:
+
+```bash
+# Terapkan migration terbaru
+flask db upgrade
+
+# Seed data default (idempotent)
+flask seed-defaults
+
+# Buat revision migration baru setelah ubah model
+flask db migrate -m "deskripsi perubahan"
+
+# (Opsional) rollback 1 step
+flask db downgrade -1
+```
+
+Catatan operasional:
+- Docker startup menjalankan `flask db upgrade` otomatis sebelum app start.
+- Docker startup juga menjalankan `flask seed-defaults` (idempotent).
+- Local startup via `start.sh` menjalankan `flask db upgrade` + `flask seed-defaults` otomatis.
+- Untuk setiap perubahan model (tambah/ubah kolom), selalu commit file di `migrations/versions/` bersama perubahan kode.

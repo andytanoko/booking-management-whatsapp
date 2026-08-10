@@ -8,7 +8,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const baseUrl = process.env.BASE_URL || 'http://localhost:8080';
 const loginUser = process.env.UAT_USER || 'admin';
-const loginPassword = process.env.UAT_PASSWORD || 'admin123';
+const loginPassword = process.env.UAT_PASSWORD || '';
 const chromiumCandidates = [
   process.env.CHROMIUM_PATH,
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -61,6 +61,10 @@ async function waitFor(fn, timeoutMs = 10000, intervalMs = 250) {
 }
 
 async function main() {
+  if (!loginPassword) {
+    fail('UAT_PASSWORD is required. Set env var UAT_PASSWORD before running UAT.');
+  }
+
   const chromium = findChromium();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bmw-chromium-uat-'));
   const remoteDebuggingPort = 9222;

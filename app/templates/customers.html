@@ -90,6 +90,23 @@
       </tbody>
     </table>
   </div>
+  {% if contacts_pagination and contacts_pagination.pages > 1 %}
+  <div class="pager">
+    {% if contacts_pagination.has_prev %}
+    <a class="btn-secondary" href="{{ url_for('customers', page=contacts_pagination.prev_num, q=search) }}">Sebelumnya</a>
+    {% else %}
+    <span class="btn-secondary disabled">Sebelumnya</span>
+    {% endif %}
+
+    <span class="pager-info">Halaman {{ contacts_pagination.page }} dari {{ contacts_pagination.pages }}</span>
+
+    {% if contacts_pagination.has_next %}
+    <a class="btn-secondary" href="{{ url_for('customers', page=contacts_pagination.next_num, q=search) }}">Berikutnya</a>
+    {% else %}
+    <span class="btn-secondary disabled">Berikutnya</span>
+    {% endif %}
+  </div>
+  {% endif %}
 </section>
 
 <script>
