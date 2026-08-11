@@ -21,6 +21,20 @@ const DEFAULT_CLIENT_ID = 'detailing-ops';
 // instanceId -> { id, clientId, label, client, qr, qrAt, ready, error, phone, createdAt, inboundStats }
 const instances = new Map();
 
+// whatsapp-web.js/puppeteer throws from deep internal callbacks (e.g.
+// "Execution context was destroyed" / ProtocolError) right after a logout
+// navigation. These aren't awaited on our side, so without these handlers they
+// become uncaught and kill the whole bridge, taking down every instance and the
+// HTTP server. Log and keep running instead; the disconnected handler rebuilds
+// the affected instance.
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection (ignored):', reason && reason.message ? reason.message : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception (ignored):', err && err.message ? err.message : err);
+});
+
+
 function normalizePhoneId(chatId) {
   const raw = String(chatId || '').trim();
   if (!raw) {
@@ -217,6 +231,19 @@ function clearStaleSingletonLock(clientId) {
   }
 }
 
+// A `disconnected: LOGOUT` means the persisted session is dead and WhatsApp
+// will reject it on every restore. Since the auth dir is bind-mounted it
+// survives container restarts, so unless we wipe it the bridge replays the
+// same logged-out session forever and can never link a fresh device.
+function wipeSessionData(clientId) {
+  const profileDir = path.join(__dirname, '.wwebjs_auth', `session-${clientId}`);
+  try {
+    fs.rmSync(profileDir, { recursive: true, force: true });
+  } catch (err) {
+    console.error(`Failed to wipe session dir for ${clientId}:`, err.message || err);
+  }
+}
+
 function createInstance({ id, clientId, label }) {
   clearStaleSingletonLock(clientId);
 
@@ -300,6 +327,24 @@ function createInstance({ id, clientId, label }) {
     inst.ready = false;
     inst.error = `disconnected: ${reason}`;
     console.error(`[${id}]`, inst.error);
+
+    // On LOGOUT the persisted session is unusable; destroy the client, wipe the
+    // auth dir, and rebuild a fresh instance so a new QR/pairing can actually
+    // complete instead of restoring the same dead session on every restart.
+    if (String(reason).toUpperCase() === 'LOGOUT') {
+      setTimeout(async () => {
+        try {
+          await inst.client.destroy();
+        } catch (err) {
+          // Puppeteer often throws here because the page already navigated away
+          // during logout; the destroy still tears the browser down.
+        }
+        wipeSessionData(clientId);
+        instances.delete(id);
+        console.log(`[${id}] Session wiped after logout; re-initializing for fresh link.`);
+        createInstance({ id, clientId, label: inst.label });
+      }, 0);
+    }
   });
 
   client.on('message_create', async (msg) => {

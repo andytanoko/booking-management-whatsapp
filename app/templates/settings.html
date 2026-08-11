@@ -187,6 +187,7 @@ function resetServiceForm() {
   {% if not bridge_detected %}
   <div class="alert error">Bridge belum terdeteksi. Jalankan service bridge QR pada port 3000 untuk mengelola nomor tambahan.</div>
   {% else %}
+    <div id="wa-instances-status">
     {% if wa_instances %}
     <div class="table-wrap">
       <table>
@@ -257,6 +258,7 @@ function resetServiceForm() {
     {% else %}
     <p>Belum ada nomor WhatsApp terdaftar.</p>
     {% endif %}
+    </div>
 
     <form method="post" class="form-grid two-col">
       <label>Label Nomor Baru
@@ -266,9 +268,46 @@ function resetServiceForm() {
         <button type="submit" name="action" value="wa_number_add">{{ icon('plus-circle') }} Tambah Nomor &amp; Generate QR</button>
       </div>
     </form>
-    <p class="hint">Setelah klik tambah, scan QR yang muncul di tabel di atas menggunakan WhatsApp di HP nomor baru tersebut. Refresh halaman jika QR belum muncul.</p>
+    <p class="hint">Setelah klik tambah, scan QR yang muncul di tabel di atas menggunakan WhatsApp di HP nomor baru tersebut. Status akan diperbarui otomatis setelah scan berhasil.</p>
   {% endif %}
 </section>
+
+<script>
+// Auto-refresh the WA instance status table while any number is still pending
+// (waiting for QR scan / preparing), so a successful link flips to "Terhubung"
+// without a manual page reload.
+(function () {
+  var container = document.getElementById('wa-instances-status');
+  if (!container) { return; }
+
+  function anyPending(root) {
+    return /Menunggu Scan QR|Menyiapkan|Menunggu QR/.test(root.textContent || '');
+  }
+  if (!anyPending(container)) { return; }
+
+  var timer = setInterval(function () {
+    // Skip a cycle if the user is typing inside this section (e.g. pairing phone).
+    if (container.contains(document.activeElement)) { return; }
+    fetch(window.location.pathname + window.location.search, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      credentials: 'same-origin'
+    })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (html) {
+        if (!html) { return; }
+        var fresh = new DOMParser().parseFromString(html, 'text/html').getElementById('wa-instances-status');
+        if (!fresh) { return; }
+        container.innerHTML = fresh.innerHTML;
+        if (!anyPending(container)) { clearInterval(timer); }
+      })
+      .catch(function () { /* transient error; keep polling */ });
+  }, 5000);
+
+  if (window.__spaRegisterCleanup) {
+    window.__spaRegisterCleanup(function () { clearInterval(timer); });
+  }
+})();
+</script>
 
 <section class="card">
   <div class="card-header">{{ icon('send') }}<h2>Test Kirim Pesan</h2></div>
