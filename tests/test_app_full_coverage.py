@@ -1224,17 +1224,23 @@ class TestSettingsRoute:
     def test_get_with_qr_profile(self, session_login):
         from types import SimpleNamespace
 
+        # Mirrors the real BridgeProfile: the QR is served from this app's own
+        # authenticated route, keyed by the gateway session name.
         profile = SimpleNamespace(
-            base_url="http://bridge:3000",
-            qr_path="/qr",
+            base_url="http://openwa:2785",
+            qr_path="/whatsapp/qr",
             has_qr=True,
-            auth_required=False,
-            connected=True,
-            detected_from="/status",
+            auth_required=True,
+            connected=False,
+            instance_id="default",
+            detected_from="openwa:qr_ready",
         )
         with patch("app.app.discover_bridge_profile", return_value=profile):
             resp = session_login.get("/settings")
         assert resp.status_code == 200
+        # The page must link at the app-local proxy, never straight at the gateway.
+        assert b"/whatsapp/qr/default" in resp.data
+        assert b"/wa-bridge" not in resp.data
 
 
 # --------------------------------------------------------------------------- #

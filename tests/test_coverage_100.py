@@ -4,25 +4,33 @@ Targeted tests to reach 100% coverage for:
 - app/services/reminders.py
 - app/services/message_service.py
 """
+import json
+import re
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, Mock, patch
 from urllib import error
+from urllib.parse import urlsplit
 
 import pytest
 
 from app.models import Booking, Customer, ReminderLog, ServiceType, WhatsAppMessage, db
 from app.services import whatsapp as wa
 from app.services.whatsapp import (
+    _SESSION_UUID_CACHE,
     BridgeProfile,
     BridgeWhatsAppGateway,
     WhatsAppGateway,
-    _probe_bridge,
+    _openwa_request,
     discover_bridge_base_url,
     discover_bridge_profile,
 )
 from app.services.reminders import ReminderService
 from app.services.message_service import MessageService
 from app.services.settings_store import set_setting
+
+BASE_URL = "http://openwa-test:2785"
+SESSION_NAME = "default"
+SESSION_UUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
 def _resp(status=200, body='{"ok": true}'):
@@ -35,86 +43,134 @@ def _resp(status=200, body='{"ok": true}'):
     return m
 
 
+def _router(routes, default=None):
+    """urlopen side_effect that answers by request path (full-match regex)."""
+    def _open(req, timeout=None):
+        path = urlsplit(req.full_url).path
+        for pattern, outcome in routes.items():
+            if re.fullmatch(pattern, path):
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                return _resp(*outcome)
+        if default is None:
+            raise AssertionError(f"unexpected OpenWA request path: {path}")
+        return _resp(*default)
+
+    return _open
+
+
+@pytest.fixture
+def openwa_env(monkeypatch):
+    """Configure OpenWA and keep the session-uuid cache from leaking."""
+    monkeypatch.setenv("OPENWA_BASE_URL", BASE_URL)
+    monkeypatch.setenv("OPENWA_API_KEY", "test-api-key")
+    monkeypatch.setenv("OPENWA_SESSION_ID", SESSION_NAME)
+    _SESSION_UUID_CACHE.clear()
+    yield
+    _SESSION_UUID_CACHE.clear()
+
+
+@pytest.fixture
+def openwa_session(openwa_env):
+    """As openwa_env, plus a pre-resolved session uuid."""
+    _SESSION_UUID_CACHE[SESSION_NAME] = SESSION_UUID
+    yield SESSION_UUID
+
+
 # --------------------------------------------------------------------------- #
 # whatsapp.py
 # --------------------------------------------------------------------------- #
 class TestWhatsAppCoverage:
-    def test_probe_bridge_server_error_status(self):
-        """status >= 500 keeps looping and ultimately returns False (55->51)."""
-        with patch("app.services.whatsapp.request.urlopen", return_value=_resp(status=500)):
-            assert _probe_bridge("http://localhost:3000", "/qr") is False
+    def test_openwa_request_server_error_status_is_returned(self, openwa_env):
+        """A 5xx is reported as-is instead of being swallowed.
 
-    def test_discover_uses_env_url(self, app, monkeypatch):
-        """WHATSAPP_BRIDGE_BASE_URL is added to candidates (line 73)."""
-        monkeypatch.setenv("WHATSAPP_BRIDGE_BASE_URL", "http://env-host:3000")
-        with app.app_context():
-            with patch("app.services.whatsapp._probe_bridge", return_value=False):
-                assert discover_bridge_base_url() == ""
-
-    def test_discover_public_base_without_hostname(self, app):
-        """public_base_url without a hostname skips the append (77->80)."""
-        with app.app_context():
-            set_setting("public_base_url", "not-a-url")
-            with patch("app.services.whatsapp._probe_bridge", return_value=False):
-                assert discover_bridge_base_url() == ""
-
-    def test_discover_skips_empty_candidate(self, app):
-        """Empty candidate strings are skipped (line 94)."""
-        with app.app_context():
-            with patch("app.services.whatsapp._probe_bridge", return_value=False):
-                assert discover_bridge_base_url(extra_candidates=[""]) == ""
-
-    def test_profile_configured_paths_status_with_env_key(self, app, monkeypatch):
-        """Configured qr/send paths, failing qr probes, status found with env key.
-
-        Covers 126-127, 129-130, 133->144, 138->133, 158-true, 173->176.
+        The old bridge probe treated any non-2xx as "keep looking at the next
+        candidate host". There are no candidates now, so the status has to reach
+        the caller.
         """
-        monkeypatch.setenv("WHATSAPP_BRIDGE_API_KEY", "envkey")
+        with patch("app.services.whatsapp.request.urlopen", return_value=_resp(status=500)):
+            assert _openwa_request("GET", "/api/health/ready") == (500, {"ok": True})
+
+    def test_discover_uses_env_base_url(self, app, openwa_env, monkeypatch):
+        """OPENWA_BASE_URL is the single source of the gateway address."""
+        monkeypatch.setenv("OPENWA_BASE_URL", "http://env-host:2785")
         with app.app_context():
-            set_setting("bridge_qr_path", "myqr")
-            set_setting("bridge_send_path", "mysend")
             with patch(
-                "app.services.whatsapp.discover_bridge_base_url",
-                return_value="http://localhost:3000",
-            ), patch(
                 "app.services.whatsapp.request.urlopen",
-                return_value=_resp(status=500),
-            ), patch(
-                "app.services.whatsapp._request_json",
-                return_value={"connected": True, "instance_id": "abc"},
+                side_effect=_router({r"/api/health/ready": (200, "{}")}),
+            ):
+                assert discover_bridge_base_url() == "http://env-host:2785"
+
+    def test_discover_returns_empty_when_health_fails(self, app, openwa_env):
+        """Health check not 200 means "no gateway" for every caller."""
+        with app.app_context():
+            with patch(
+                "app.services.whatsapp.request.urlopen",
+                side_effect=_router({r"/api/health/ready": (500, "{}")}),
+            ):
+                assert discover_bridge_base_url() == ""
+
+    def test_discover_returns_empty_when_unconfigured(self, app, monkeypatch):
+        """No API key means no request is attempted at all."""
+        monkeypatch.setenv("OPENWA_BASE_URL", BASE_URL)
+        monkeypatch.delenv("OPENWA_API_KEY", raising=False)
+        with app.app_context():
+            with patch("app.services.whatsapp.request.urlopen") as mock_open:
+                assert discover_bridge_base_url() == ""
+            mock_open.assert_not_called()
+
+    def test_discover_ignores_extra_candidates(self, app, openwa_env):
+        """extra_candidates survives only for signature compatibility."""
+        with app.app_context():
+            with patch(
+                "app.services.whatsapp.request.urlopen",
+                side_effect=_router({r"/api/health/ready": (200, "{}")}),
+            ):
+                result = discover_bridge_base_url(extra_candidates=["", "http://extra-host:3000"])
+        assert result == BASE_URL
+
+    def test_profile_fields_come_from_the_session_record(self, app, openwa_session):
+        """Paths are fixed and the API key is never surfaced to templates."""
+        session_body = json.dumps({
+            "id": SESSION_UUID, "name": "cs-2", "status": "ready",
+        })
+        with app.app_context():
+            with patch(
+                "app.services.whatsapp.request.urlopen",
+                side_effect=_router({
+                    r"/api/health/ready": (200, "{}"),
+                    rf"/api/sessions/{SESSION_UUID}": (200, session_body),
+                }),
             ):
                 profile = discover_bridge_profile()
         assert profile is not None
-        assert profile.send_path == "/mysend"
-        assert profile.qr_path == "/qr"
-        assert profile.api_key == "envkey"
+        assert profile.send_path == "/api/sessions/{session}/messages/send-text"
+        assert profile.qr_path == "/whatsapp/qr"
+        assert profile.api_key == ""
+        assert profile.instance_id == "cs-2"
         assert profile.connected is True
+        assert profile.detected_from == "openwa:ready"
 
-    def test_profile_no_status_qr_exception(self, app, monkeypatch):
-        """No status payload and qr probes raising exceptions.
-
-        Covers 141-142, 152->158, 154->152, 158->176.
-        """
-        monkeypatch.delenv("WHATSAPP_BRIDGE_API_KEY", raising=False)
+    def test_profile_when_session_lookup_is_unreachable(self, app, openwa_session):
+        """Gateway reachable, session fetch failing: not connected, no status."""
         with app.app_context():
             with patch(
                 "app.services.whatsapp.discover_bridge_base_url",
-                return_value="http://localhost:3000",
+                return_value=BASE_URL,
             ), patch(
                 "app.services.whatsapp.request.urlopen",
                 side_effect=Exception("down"),
-            ), patch(
-                "app.services.whatsapp._request_json",
-                return_value=None,
             ):
                 profile = discover_bridge_profile()
         assert profile is not None
-        assert profile.detected_from == "heuristic"
+        assert profile.detected_from == "openwa"
         assert profile.connected is False
+        assert profile.has_qr is False
+        assert profile.auth_required is True
         assert profile.api_key == ""
 
     def test_abstract_gateway_raises_not_implemented(self):
-        """Calling the abstract send_message raises NotImplementedError (line 194)."""
+        """Calling the abstract send_message raises NotImplementedError."""
 
         class Concrete(WhatsAppGateway):
             def send_message(self, phone, text, chat_id=None):
@@ -123,43 +179,26 @@ class TestWhatsAppCoverage:
         with pytest.raises(NotImplementedError):
             Concrete().send_message("628", "hi")
 
-    def test_bridge_send_missing_url(self, app):
-        """Profile with empty base_url returns bridge-missing-url (line 215)."""
-        profile = BridgeProfile(
-            base_url="",
-            send_path="/send",
-            qr_path="/qr",
-            api_key="",
-            instance_id="",
-            auth_required=False,
-            connected=True,
-            has_qr=False,
-            detected_from="heuristic",
-        )
-        with app.app_context():
-            with patch(
-                "app.services.whatsapp.discover_bridge_profile",
-                return_value=profile,
-            ):
-                ok, status = BridgeWhatsAppGateway().send_message("628", "hi")
-        assert ok is False
-        assert status == "bridge-missing-url"
+    def test_bridge_send_unconfigured_gateway(self, app, monkeypatch):
+        """No API key: the session cannot be resolved, so nothing is sent.
 
-    def test_bridge_send_http_error(self, app):
-        """urlopen raising HTTPError returns bridge-http-<code> (line 243)."""
-        profile = BridgeProfile(
-            base_url="http://localhost:3000",
-            send_path="/send",
-            qr_path="/qr",
-            api_key="key",
-            instance_id="inst",
-            auth_required=False,
-            connected=True,
-            has_qr=False,
-            detected_from="heuristic",
-        )
+        Replaces the old "profile with an empty base_url" case: the base URL is
+        no longer discovered, so the failure mode is an unresolvable session.
+        """
+        monkeypatch.setenv("OPENWA_BASE_URL", BASE_URL)
+        monkeypatch.delenv("OPENWA_API_KEY", raising=False)
+        _SESSION_UUID_CACHE.clear()
+        with app.app_context():
+            with patch("app.services.whatsapp.request.urlopen") as mock_open:
+                ok, status = BridgeWhatsAppGateway().send_message("628123456789", "hi")
+            mock_open.assert_not_called()
+        assert ok is False
+        assert status == "bridge-not-found"
+
+    def test_bridge_send_http_error(self, app, openwa_session):
+        """urlopen raising HTTPError with no body returns bridge-http-<code>."""
         http_error = error.HTTPError(
-            url="http://localhost:3000/send",
+            url=f"{BASE_URL}/api/sessions/{SESSION_UUID}/messages/send-text",
             code=401,
             msg="Unauthorized",
             hdrs=None,
@@ -167,15 +206,33 @@ class TestWhatsAppCoverage:
         )
         with app.app_context():
             with patch(
-                "app.services.whatsapp.discover_bridge_profile",
-                return_value=profile,
-            ), patch(
                 "app.services.whatsapp.request.urlopen",
                 side_effect=http_error,
             ):
-                ok, status = BridgeWhatsAppGateway().send_message("628", "hi", chat_id="628@c.us")
+                ok, status = BridgeWhatsAppGateway().send_message(
+                    "628123456789", "hi", chat_id="628123456789@c.us",
+                )
         assert ok is False
         assert status == "bridge-http-401"
+
+    def test_bridge_send_http_error_with_body(self, app, openwa_session):
+        """An HTTPError carrying OpenWA's message surfaces that message."""
+        http_error = error.HTTPError(
+            url=f"{BASE_URL}/api/sessions/{SESSION_UUID}/messages/send-text",
+            code=422,
+            msg="Unprocessable",
+            hdrs=None,
+            fp=None,
+        )
+        http_error.read = MagicMock(return_value=b'{"message": ["chatId is required"]}')
+        with app.app_context():
+            with patch(
+                "app.services.whatsapp.request.urlopen",
+                side_effect=http_error,
+            ):
+                ok, status = BridgeWhatsAppGateway().send_message("628123456789", "hi")
+        assert ok is False
+        assert status == "chatId is required"
 
 
 # --------------------------------------------------------------------------- #

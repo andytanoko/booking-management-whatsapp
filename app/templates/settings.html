@@ -167,7 +167,7 @@ function resetServiceForm() {
   <p>Bridge Anda meminta autentikasi. Sistem akan mencoba auto-detect token jika bridge menyediakannya.</p>
   {% endif %}
   {% else %}
-  <div class="alert error">Bridge belum terdeteksi otomatis. Jalankan service bridge QR pada port 3000.</div>
+  <div class="alert error">Gateway WhatsApp belum terdeteksi otomatis. Periksa container <code>openwa</code> pada server (<code>docker compose ps</code>).</div>
   {% endif %}
   <ol>
     <li>Pastikan mode WhatsApp menggunakan Bridge QR di konfigurasi server.</li>
@@ -185,9 +185,22 @@ function resetServiceForm() {
   <p>Daftarkan nomor WhatsApp tambahan. Setiap nomor punya sesi bridge sendiri dan QR sendiri untuk discan.</p>
 
   {% if not bridge_detected %}
-  <div class="alert error">Bridge belum terdeteksi. Jalankan service bridge QR pada port 3000 untuk mengelola nomor tambahan.</div>
+  <div class="alert error">Gateway WhatsApp belum terdeteksi. Periksa container <code>openwa</code> pada server.</div>
   {% else %}
-    <div id="wa-instances-status">
+    {#
+      Whether a link is mid-flight is decided here, server-side, and published as
+      a data attribute. The poller used to decide by regex-matching the Indonesian
+      status labels, so renaming a label silently disabled auto-refresh.
+      Only genuine transitions count: a session sitting at `created`, `failed` or
+      `disconnected` is not going to change on its own, so we don't poll forever.
+    #}
+    {% set ns = namespace(pending=false) %}
+    {% for inst in wa_instances %}
+      {% if not inst.connected and (inst.has_qr or inst.status in ['initializing', 'qr_ready', 'authenticating']) %}
+        {% set ns.pending = true %}
+      {% endif %}
+    {% endfor %}
+    <div id="wa-instances-status" data-wa-pending="{{ 1 if ns.pending else 0 }}">
     {% if wa_instances %}
     <div class="table-wrap">
       <table>
@@ -214,6 +227,10 @@ function resetServiceForm() {
                 <span class="alert" style="margin:0; display:inline-block; background:#fff4d6; color:#8a6d00;">Menunggu Scan QR</span>
               {% elif inst.error %}
                 <span class="alert error" style="margin:0; display:inline-block;">Error: {{ inst.error }}</span>
+              {% elif inst.status == 'created' %}
+                <span class="alert" style="margin:0; display:inline-block; background:#eee; color:#555;">Belum dijalankan</span>
+              {% elif inst.status %}
+                <span class="alert" style="margin:0; display:inline-block; background:#eee; color:#555;">Menyiapkan... ({{ inst.status }})</span>
               {% else %}
                 <span class="alert" style="margin:0; display:inline-block; background:#eee; color:#555;">Menyiapkan...</span>
               {% endif %}
@@ -224,6 +241,12 @@ function resetServiceForm() {
               -
               {% elif inst.qr_embed_url %}
               <img src="{{ inst.qr_embed_url }}" alt="QR {{ inst.label }}" class="qr-img qr-img-sm" />
+              {% elif inst.status == 'created' %}
+              {# A created session has no engine yet, so there is no QR to show. #}
+              <form method="post" class="inline-form">
+                <input type="hidden" name="instance_id" value="{{ inst.id }}" />
+                <button type="submit" name="action" value="wa_number_start" class="btn-small">{{ icon('link') }} Mulai &amp; tampilkan QR</button>
+              </form>
               {% else %}
               Menunggu QR...
               {% endif %}
@@ -273,23 +296,30 @@ function resetServiceForm() {
 </section>
 
 <script>
-// Auto-refresh the WA instance status table while any number is still pending
-// (waiting for QR scan / preparing), so a successful link flips to "Terhubung"
-// without a manual page reload.
+// Auto-refresh the WA number table while a link is mid-flight, so scanning the
+// QR flips the status to "Terhubung" on its own.
+//
+// Whether to poll comes from the server via data-wa-pending, NOT from matching
+// the rendered status text: the previous version regex-matched the Indonesian
+// labels, so adding a label ("Belum dijalankan") silently switched auto-refresh
+// off and the status only updated when some other action re-rendered the page.
 (function () {
   var container = document.getElementById('wa-instances-status');
   if (!container) { return; }
 
-  function anyPending(root) {
-    return /Menunggu Scan QR|Menyiapkan|Menunggu QR/.test(root.textContent || '');
+  function isPending(el) {
+    return !!el && el.getAttribute('data-wa-pending') === '1';
   }
-  if (!anyPending(container)) { return; }
+  if (!isPending(container)) { return; }
 
   var timer = setInterval(function () {
     // Skip a cycle if the user is typing inside this section (e.g. pairing phone).
     if (container.contains(document.activeElement)) { return; }
     fetch(window.location.pathname + window.location.search, {
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      // Must be 'fetch': wants_partial() checks for exactly this value. Sending
+      // 'XMLHttpRequest' made the server re-render the whole settings page on
+      // every 5-second poll.
+      headers: { 'X-Requested-With': 'fetch' },
       credentials: 'same-origin'
     })
       .then(function (r) { return r.ok ? r.text() : null; })
@@ -298,7 +328,9 @@ function resetServiceForm() {
         var fresh = new DOMParser().parseFromString(html, 'text/html').getElementById('wa-instances-status');
         if (!fresh) { return; }
         container.innerHTML = fresh.innerHTML;
-        if (!anyPending(container)) { clearInterval(timer); }
+        // Carry the server's fresh verdict over before re-checking.
+        container.setAttribute('data-wa-pending', fresh.getAttribute('data-wa-pending') || '0');
+        if (!isPending(container)) { clearInterval(timer); }
       })
       .catch(function () { /* transient error; keep polling */ });
   }, 5000);

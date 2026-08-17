@@ -8,6 +8,7 @@ import re
 
 from typing import Optional
 from flask import current_app
+from sqlalchemy.exc import IntegrityError
 
 from app.models import Customer, db
 from app.services.db_ops import safe_commit
@@ -15,6 +16,75 @@ from app.services.db_ops import safe_commit
 
 class CustomerService:
     """Service for managing customer operations."""
+
+    @staticmethod
+    def is_placeholder_name(name: Optional[str]) -> bool:
+        """True when a name is empty or an auto-generated WhatsApp placeholder."""
+        n = (name or '').strip()
+        return not n or n.startswith('WhatsApp ') or n.startswith('Pelanggan ')
+
+    @staticmethod
+    def sync_from_whatsapp(
+        number: Optional[str] = None,
+        lid: Optional[str] = None,
+        contact_name: Optional[str] = None,
+        notes: str = 'Sinkron dari WhatsApp',
+    ) -> tuple[Optional[Customer], str]:
+        """Find-or-create/update a customer from a WhatsApp-sourced contact.
+
+        Single source of truth for both the contact-sync button and the inbound
+        webhook. Matching order: LID first, then phone. A record is created only
+        when a real name is supplied (never fabricate a placeholder); existing
+        records get phone (when free of clashes), LID, and placeholder names
+        backfilled. Adds/flushes but does not commit — the caller owns the
+        transaction and commit.
+
+        Returns (customer_or_None, status) where status is one of
+        'created', 'updated', 'unchanged', 'skipped'.
+        """
+        number = str(number or '').strip()
+        lid = str(lid or '').strip()
+        contact_name = str(contact_name or '').strip()
+        number_ok = number.isdigit() and 8 <= len(number) <= 15
+        lid_ok = lid.isdigit() and 8 <= len(lid) <= 20
+        if not number_ok and not lid_ok:
+            return None, 'skipped'
+
+        customer = Customer.query.filter_by(lid=lid).first() if lid_ok else None
+        if customer is None and number_ok:
+            customer = Customer.query.filter_by(phone=number).first()
+
+        if customer is None:
+            if not contact_name:
+                return None, 'skipped'
+            phone_val = number if number_ok else lid
+            customer = Customer(
+                name=contact_name,
+                phone=phone_val,
+                lid=lid if lid_ok else None,
+                notes=notes,
+            )
+            db.session.add(customer)
+            try:
+                db.session.flush()
+            except IntegrityError:
+                db.session.rollback()
+                return None, 'skipped'
+            return customer, 'created'
+
+        changed = False
+        if number_ok and customer.phone != number:
+            clash = Customer.query.filter(Customer.phone == number, Customer.id != customer.id).first()
+            if clash is None:
+                customer.phone = number
+                changed = True
+        if lid_ok and not customer.lid:
+            customer.lid = lid
+            changed = True
+        if contact_name and CustomerService.is_placeholder_name(customer.name):
+            customer.name = contact_name
+            changed = True
+        return customer, ('updated' if changed else 'unchanged')
 
     @staticmethod
     def normalize_phone(raw: str) -> str:
@@ -76,36 +146,14 @@ class CustomerService:
             customer = Customer.query.filter_by(lid=lid).first()
         
         if customer is None:
-            # Only create new customer with a real identifier
+            # Only create a customer when we have an identifier AND a real name.
+            # Unnamed contacts must not pollute the customer table.
             if not real_number and not lid:
                 return None
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-                
+            if not contact_name:
+                return None
             customer = Customer(
-                name=contact_name or f"WhatsApp {real_number[-4:] if real_number else 'Customer'}",
+                name=contact_name,
                 phone=real_number or "",
                 lid=lid or None,
                 notes="Otomatis dari WhatsApp"
@@ -140,11 +188,7 @@ class CustomerService:
             customer.lid = lid
             changed = True
             
-        if contact_name and (
-            not customer.name
-            or customer.name.startswith('WhatsApp ')
-            or customer.name.startswith('Pelanggan ')
-        ):
+        if contact_name and CustomerService.is_placeholder_name(customer.name):
             customer.name = contact_name
             changed = True
         
@@ -155,41 +199,22 @@ class CustomerService:
 
     @staticmethod
     def get_or_create_by_phone(phone: str) -> Optional[Customer]:
-        """Get customer by phone or create if not exists.
-        
+        """Get customer by phone. Does not create placeholder-named records.
+
         Args:
             phone: Phone number (will be normalized)
-            
+
         Returns:
-            Customer object or None if phone invalid
+            Existing customer, or None if phone invalid or not found
         """
         normalized = CustomerService.normalize_phone(phone)
         if not normalized:
             return None
-        
-
-
-
-
-
-
-
-
-
-
-
         try:
-            customer = Customer.query.filter_by(phone=normalized).first()
-            if not customer:
-                customer = Customer(
-                    name=f"WhatsApp {normalized[-4:]}",
-                    phone=normalized,
-                    notes="Otomatis dari WhatsApp"
-                )
-                db.session.add(customer)
-                if not safe_commit("customer get_or_create_by_phone insert"):
-                    return None
-            return customer
+            # Never fabricate a placeholder name: return the existing customer or
+            # None. Callers that need to create must supply a real name via
+            # find_or_create(contact_name=...).
+            return Customer.query.filter_by(phone=normalized).first()
         except Exception as e:
             current_app.logger.error(f"Error in get_or_create_by_phone: {e}")
             db.session.rollback()

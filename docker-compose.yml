@@ -33,29 +33,89 @@ services:
     volumes:
       - ./:/app
 
-  wa-bridge:
-    build: ./tools/wa-real-bridge
+  # WhatsApp gateway. Replaced the previous custom Node bridge
+  # (tools/wa-real-bridge), which drove a headless Chromium via whatsapp-web.js.
+  #
+  # Pinned by digest, not tag: OpenWA publishes releases every day or two, and
+  # `latest` would silently move a component that holds the WhatsApp session.
+  # To upgrade, look up the new digest deliberately.
+  openwa:
+    image: rmyndharis/openwa:0.20.0@sha256:1a0730a120cea7a90049f67ed1a5936484d9fdcb001b0a1e94eef6c1540c65a2
     restart: always
-    tty: true
-    stdin_open: true
     expose:
-      - "3000"
+      - "2785"
+    # Chromium teardown can outlive Docker's default 10s SIGKILL and orphan a
+    # session profile; OpenWA's own compose uses 45s.
+    stop_grace_period: 45s
+    # whatsapp-web.js runs a full multi-process Chromium per session, so the
+    # default pid ceiling is too low and a session dies mid-spawn.
+    pids_limit: 2048
+    mem_limit: 2g
+    security_opt:
+      - "no-new-privileges:true"
     environment:
-      BRIDGE_PORT: 3000
-      # Service name on the compose network, not localhost.
-      APP_WEBHOOK_URL: http://web:5000/api/whatsapp/inbound
-      FORWARD_GROUPS: ${FORWARD_GROUPS:-false}
-      # Only set to "true" behind a corporate TLS-intercepting proxy (e.g.
-      # Netskope) where the intercepting CA can't otherwise be trusted by
-      # Chromium. Leave unset in production.
-      WA_BRIDGE_IGNORE_CERT_ERRORS: ${WA_BRIDGE_IGNORE_CERT_ERRORS:-false}
-    depends_on:
-      - web
+      PORT: 2785
+      NODE_ENV: production
+      LOG_LEVEL: ${OPENWA_LOG_LEVEL:-info}
+
+      # SQLite is sufficient here: one number, well inside its ~5 session limit.
+      # Deliberately NOT sharing the app's Postgres - separate blast radius.
+      DATABASE_TYPE: sqlite
+
+      # Engine. Blank selects whatsapp-web.js. Switch to `baileys` for a
+      # browser-free socket client at the cost of a higher fingerprinting
+      # profile. Changing this re-links the session.
+      ENGINE_TYPE: ${OPENWA_ENGINE:-}
+
+      # Resolves an @lid privacy-id sender to real phone digits and attaches it
+      # inline as `senderPhone` on every inbound message. This is what replaces
+      # the bridge's hand-rolled resolveInboundPhone/resolveLidToCUs scanning.
+      RESOLVE_LID_TO_PHONE: "true"
+
+      # Re-adopt an authenticated session after a container restart instead of
+      # sitting unlinked until someone opens the dashboard.
+      AUTO_START_SESSIONS: "true"
+
+      # Anti-ban send governor: warm-up ramp, daily cap for a cold number, and a
+      # breaker that trips on repeated failures. Directly relevant given this
+      # account has already been rate-limited once.
+      SEND_PACING_ENABLED: "true"
+
+      # Leave blank to auto-pin a settled WhatsApp Web build from the
+      # wppconnect-team/wa-version registry. That is what would have prevented
+      # the linking breakage the old bridge hit.
+      WWEBJS_WEB_VERSION: ${OPENWA_WWEBJS_WEB_VERSION:-}
+
+      # Root API key. Required - without it OpenWA generates one at first boot
+      # and it is only printed once in the container log.
+      API_MASTER_KEY: ${OPENWA_API_KEY:?OPENWA_API_KEY is required}
+      # Pepper for API key hashing at rest.
+      API_KEY_PEPPER: ${OPENWA_API_KEY_PEPPER:?OPENWA_API_KEY_PEPPER is required}
+
+      # Must be >= WEBHOOK_TIMEOUT (10s default) or an in-flight delivery is
+      # abandoned at shutdown - and a dropped inbound message is unrecoverable,
+      # since the Flask side has no replay.
+      WEBHOOK_SHUTDOWN_DRAIN_MS: "15000"
+
+      # OpenWA's SSRF guard blocks webhook targets that resolve to private
+      # addresses, which is the right default but rejects our own `web` service
+      # ("Destination address is not allowed"). Allowlist just that hostname
+      # rather than turning the protection off.
+      SSRF_ALLOWED_HOSTS: ${OPENWA_SSRF_ALLOWED_HOSTS:-web}
+
+      # Dashboard is bundled and served on the same port. Reached through nginx.
+      SERVE_DASHBOARD: "true"
+      BASE_URL: ${OPENWA_BASE_URL:-}
+      # nginx sits in front, so trust its forwarded-for for rate limiting.
+      TRUSTED_PROXIES: ${OPENWA_TRUSTED_PROXIES:-172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
     volumes:
-      # Bind-mount so .wwebjs_auth/.wwebjs_cache/instances.json survive restarts;
-      # node_modules gets its own volume so the host bind mount doesn't shadow it.
-      - ./tools/wa-real-bridge:/usr/src/app
-      - wa_bridge_node_modules:/usr/src/app/node_modules
+      - openwa_data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:2785/api/health/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   nginx:
     image: nginx:1.27-alpine
@@ -66,10 +126,12 @@ services:
       - "8080:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    # nginx resolves upstream names once at startup and refuses to boot if any is
+    # unresolvable, so every name referenced in nginx.conf must be listed here.
+    # nginx.conf proxies only to `web`; the gateway is not publicly exposed.
     depends_on:
       - web
-      - wa-bridge
 
 volumes:
   pgdata:
-  wa_bridge_node_modules:
+  openwa_data:

@@ -70,3 +70,4 @@ instance/
 *.log
 logs/
 export-and-send.sh
+flake8-report.txt

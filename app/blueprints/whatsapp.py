@@ -1,4 +1,6 @@
 import json
+import hashlib
+import hmac
 import time
 from datetime import datetime, timedelta
 
@@ -7,9 +9,17 @@ from flask_login import current_user, login_required
 
 from app.models import AuditLog, Booking, Customer, ServiceType, WhatsAppMessage, db
 from app.services.booking_engine import compute_booking_end, has_conflict
+from app.services.customer_service import CustomerService
 from app.services.message_service import MessageService
 from app.services.semantic_matcher import get_variant_info, match_package_to_service
-from app.services.whatsapp import check_whatsapp_number_registered, log_inbound_message, normalize_whatsapp_number, send_and_log_message
+from app.services.whatsapp import (
+    check_whatsapp_number_registered,
+    fetch_session_qr_png,
+    log_inbound_message,
+    normalize_whatsapp_number,
+    openwa_webhook_secret,
+    send_and_log_message,
+)
 
 whatsapp_bp = Blueprint('whatsapp', __name__)
 
@@ -41,35 +51,14 @@ def _resolve_real_number(payload: dict, phone: str) -> str:
 def _sync_customer_from_inbound(payload: dict, phone: str) -> None:
     real_number = _resolve_real_number(payload, phone)
     lid = _extract_lid(payload, phone)
-    if not real_number and not lid:
-        return
-
     contact_name = str(payload.get('contact_name', '') or '').strip()
-    customer = Customer.query.filter_by(lid=lid).first() if lid else None
-    if customer is None and real_number:
-        customer = Customer.query.filter_by(phone=real_number).first()
-
-    if customer is None:
-        if not real_number:
-            return
-        customer = Customer(
-            name=contact_name or f'WhatsApp {real_number[-4:]}',
-            phone=real_number,
-            lid=lid or None,
-            notes='Otomatis dari WhatsApp',
-        )
-        db.session.add(customer)
-        db.session.commit()
-        return
-
-    changed = False
-    if lid and not customer.lid:
-        customer.lid = lid
-        changed = True
-    if contact_name and (not customer.name or customer.name.startswith('WhatsApp ') or customer.name.startswith('Pelanggan ')):
-        customer.name = contact_name
-        changed = True
-    if changed:
+    _, outcome = CustomerService.sync_from_whatsapp(
+        number=real_number,
+        lid=lid,
+        contact_name=contact_name,
+        notes='Otomatis dari WhatsApp',
+    )
+    if outcome in ('created', 'updated'):
         db.session.commit()
 
 
@@ -117,7 +106,7 @@ def _create_booking_from_form(form: dict, payload: dict) -> Booking | None:
     else:
         if vehicle_type and not customer.vehicle_info:
             customer.vehicle_info = vehicle_type
-        if name and (not customer.name or customer.name.startswith('WhatsApp ') or customer.name.startswith('Pelanggan ')):
+        if name and CustomerService.is_placeholder_name(customer.name):
             customer.name = name
 
     package = (form.get('package') or 'Paket WhatsApp').strip()
@@ -355,9 +344,157 @@ def send_message():
     return jsonify({'ok': message.status != 'failed', 'status': message.status, 'message': view})
 
 
+@whatsapp_bp.route('/whatsapp/qr/<instance_id>')
+@login_required
+def whatsapp_qr(instance_id: str):
+    """Serve the gateway's linking QR as a PNG, behind an admin login.
+
+    The gateway's own QR endpoint requires an X-API-Key header that a browser
+    cannot attach to an <img> tag. Fetching it here keeps the key server-side and
+    keeps the QR itself off the public internet: anyone who can read a live
+    linking QR can attach their own device to the WhatsApp account.
+    """
+    if not _authorized('admin'):
+        return jsonify({'ok': False, 'error': 'forbidden'}), 403
+
+    ok, status, png = fetch_session_qr_png(instance_id)
+    if not ok or not png:
+        # 404 keeps the <img> simply not rendering while linking isn't pending.
+        code = 404 if status.startswith('qr-') else 502
+        return jsonify({'ok': False, 'error': status}), code
+
+    response = Response(png, mimetype='image/png')
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+# Message events we turn into inbox rows. Everything else the gateway sends
+# (acks, session lifecycle, presence, calls) is acknowledged and logged only.
+_OPENWA_MESSAGE_EVENTS = ('message.received', 'message.sent')
+
+
+def _verify_openwa_signature(raw_body: bytes) -> tuple[bool, str]:
+    """Verify OpenWA's HMAC over the raw request body.
+
+    This endpoint is reachable from the internet and it can create bookings and
+    customers, so an unsigned request must never be trusted. Fails closed: a
+    missing secret is a configuration error, not a reason to accept anything.
+    """
+    secret = openwa_webhook_secret()
+    if not secret:
+        return False, 'webhook-secret-not-configured'
+
+    provided = str(request.headers.get('X-OpenWA-Signature', '') or '').strip()
+    if not provided:
+        return False, 'signature-missing'
+
+    expected = 'sha256=' + hmac.new(secret.encode('utf-8'), raw_body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(provided, expected):
+        return False, 'signature-mismatch'
+    return True, 'ok'
+
+
+def _flatten_openwa_message(envelope: dict) -> dict | None:
+    """Map an OpenWA message event onto the flat payload this app already reads.
+
+    Returns None for anything that should not reach the inbox (groups, channels,
+    status broadcasts). The `lid:` / `wa:` phone prefixes are preserved because
+    _extract_lid() and build_message_view() parse them.
+    """
+    data = envelope.get('data')
+    if not isinstance(data, dict):
+        return None
+
+    chat_id = str(data.get('chatId') or data.get('from') or '').strip()
+    kind = str(data.get('kind') or '').strip()
+
+    # Only 1:1 conversations belong in the CS inbox.
+    if data.get('isGroup') or data.get('isStatusBroadcast') or chat_id.endswith('@g.us'):
+        return None
+    if kind and kind != 'individual':
+        return None
+
+    contact = data.get('contact') if isinstance(data.get('contact'), dict) else {}
+    # senderPhone is the authoritative number behind an @lid sender, supplied by
+    # the gateway when RESOLVE_LID_TO_PHONE is enabled.
+    sender_phone = normalize_whatsapp_number(data.get('senderPhone') or '')
+    contact_number = normalize_whatsapp_number(contact.get('number') or '') or sender_phone
+
+    phone = ''
+    if chat_id.endswith('@c.us'):
+        phone = normalize_whatsapp_number(chat_id.split('@', 1)[0])
+    if not phone:
+        phone = sender_phone or contact_number
+    if not phone:
+        # Never drop a message for lack of an identity; fall back to a token the
+        # inbox knows how to label.
+        user = chat_id.split('@', 1)[0]
+        if chat_id.endswith('@lid'):
+            phone = f'lid:{user}'
+        elif user:
+            phone = f'wa:{user}'
+        else:
+            phone = 'wa:unknown'
+
+    return {
+        'phone': phone,
+        'text': str(data.get('body') or '').strip(),
+        'from_me': bool(data.get('fromMe')),
+        'chat_id': chat_id or None,
+        'contact_name': str(contact.get('name') or contact.get('pushName') or '').strip(),
+        'contact_number': contact_number,
+        'is_group': False,
+        'source': 'openwa',
+        'event': str(envelope.get('event') or ''),
+        'message_id': data.get('id'),
+        'timestamp': data.get('timestamp'),
+        'session_id': envelope.get('sessionId'),
+        'instance_id': envelope.get('sessionId'),
+        'idempotency_key': envelope.get('idempotencyKey'),
+        'is_lid_sender': bool(data.get('isLidSender')),
+    }
+
+
 @whatsapp_bp.post('/api/whatsapp/inbound')
 def whatsapp_inbound():
-    payload = request.get_json(silent=True) or {}
+    # Read the raw body before parsing: the HMAC covers the exact bytes sent.
+    raw_body = request.get_data(cache=True) or b''
+
+    signed, reason = _verify_openwa_signature(raw_body)
+    if not signed:
+        if reason == 'webhook-secret-not-configured':
+            current_app.logger.error(
+                'Inbound webhook rejected: OPENWA_WEBHOOK_SECRET is not set, so deliveries '
+                'cannot be authenticated. Set it on both the app and the gateway webhook.'
+            )
+            return jsonify({'ok': False, 'error': reason}), 503
+        current_app.logger.warning(
+            'Inbound webhook rejected (%s) from %s', reason, request.remote_addr,
+        )
+        return jsonify({'ok': False, 'error': reason}), 401
+
+    envelope = request.get_json(silent=True) or {}
+
+    # OpenWA wraps events as {event, sessionId, data, ...}. Anything without that
+    # shape is treated as an already-flat payload.
+    if isinstance(envelope.get('data'), dict) and envelope.get('event'):
+        event = str(envelope.get('event') or '')
+        if event not in _OPENWA_MESSAGE_EVENTS:
+            # Acknowledge so the gateway doesn't retry, but surface the ones that
+            # explain an outage: a restriction or a reconnect loop is exactly the
+            # failure that was previously invisible.
+            if event.startswith('session.'):
+                current_app.logger.warning(
+                    'OpenWA session event %s: %s', event, envelope.get('data'),
+                )
+            return jsonify({'ok': True, 'status': 'ignored', 'event': event})
+
+        payload = _flatten_openwa_message(envelope)
+        if payload is None:
+            return jsonify({'ok': True, 'status': 'filtered'})
+    else:
+        payload = envelope
+
     phone = str(payload.get('phone', '')).strip()
     text = str(payload.get('text', '')).strip()
     from_me = bool(payload.get('from_me', False))

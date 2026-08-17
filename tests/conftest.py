@@ -1,5 +1,8 @@
 """Pytest configuration and fixtures for the app."""
 
+import hashlib
+import hmac
+import json as _json
 import os
 import tempfile
 from datetime import datetime, timedelta
@@ -7,15 +10,60 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from flask import Flask
+from flask.testing import FlaskClient
 
 from app.models import db, User, Customer, ServiceType, Booking, WhatsAppMessage, ReminderLog, MaintenanceReminder, AuditLog, AppSetting
 from app.app import create_app
+
+# Secret the inbound webhook is verified against during tests. Must match what
+# openwa_webhook_secret() reads, which the `app` fixture sets in the environment.
+TEST_WEBHOOK_SECRET = "test-openwa-webhook-secret"
+INBOUND_PATH = "/api/whatsapp/inbound"
+
+
+def sign_webhook_body(body: bytes, secret: str = TEST_WEBHOOK_SECRET) -> str:
+    """Compute the header OpenWA sends: sha256=<hmac-sha256 of the raw body>."""
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return f"sha256={digest}"
+
+
+class SigningTestClient(FlaskClient):
+    """Test client that signs POSTs to the inbound webhook.
+
+    That endpoint authenticates deliveries with an HMAC over the raw body, so
+    without this every inbound test would 401. Signing here rather than stubbing
+    the check out means those tests still execute the real verification path;
+    the negative cases are covered explicitly in test_inbound_webhook_auth.py.
+    """
+
+    def open(self, *args, **kwargs):
+        path = kwargs.get("path") or (args[0] if args else "")
+        if isinstance(path, str) and path.split("?")[0].endswith(INBOUND_PATH):
+            body = None
+            if "json" in kwargs and kwargs["json"] is not None:
+                # Serialise here so the bytes we sign are exactly the bytes sent.
+                body = _json.dumps(kwargs.pop("json")).encode("utf-8")
+                kwargs["content_type"] = "application/json"
+            elif isinstance(kwargs.get("data"), (bytes, str)):
+                body = kwargs["data"]
+                if isinstance(body, str):
+                    body = body.encode("utf-8")
+
+            if body is not None:
+                kwargs["data"] = body
+                headers = dict(kwargs.get("headers") or {})
+                headers.setdefault("X-OpenWA-Signature", sign_webhook_body(body))
+                kwargs["headers"] = headers
+
+        return super().open(*args, **kwargs)
 
 
 @pytest.fixture
 def app():
     """Create a Flask app configured for testing."""
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+    # The inbound webhook fails closed without a secret, so tests need one set.
+    os.environ["OPENWA_WEBHOOK_SECRET"] = TEST_WEBHOOK_SECRET
     
     # Temporarily replace bootstrap_defaults to be a no-op for testing
     from app import app as app_module
@@ -69,7 +117,8 @@ def _create_test_service_types():
 
 @pytest.fixture
 def client(app):
-    """Test client for the Flask app."""
+    """Test client for the Flask app, signing inbound-webhook posts."""
+    app.test_client_class = SigningTestClient
     return app.test_client()
 
 

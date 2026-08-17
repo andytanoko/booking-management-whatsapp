@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 # start-docker.sh — Build and start the full Docker Compose stack:
-# Postgres (db), the Flask app via gunicorn (web), and the WhatsApp
-# bridge (wa-bridge).
+# Postgres (db), the Flask app via gunicorn (web), the OpenWA WhatsApp
+# gateway (openwa), and nginx.
 #
 # Usage:
 #   ./start-docker.sh              # build + run in the foreground
@@ -76,12 +76,12 @@ export WA_BRIDGE_IGNORE_CERT_ERRORS="${WA_BRIDGE_IGNORE_CERT_ERRORS:-false}"
 export DOCKER_BUILDKIT=1
 export COMPOSE_DOCKER_CLI_BUILD=1
 
-echo "Starting stack: db, web, wa-bridge ..."
+echo "Starting stack: db, web, openwa, nginx ..."
 "${COMPOSE[@]}" "${ARGS[@]}"
 
 if [ "$DETACH" -eq 1 ]; then
     echo
     echo "App:       http://localhost:8080"
-    echo "WA bridge: http://localhost:8080/wa-bridge/qr  (scan to pair WhatsApp)"
+    echo "WhatsApp:  http://localhost:8080/settings  (admin login, then link the number)"
     echo "Logs:      ${COMPOSE[*]} logs -f"
 fi

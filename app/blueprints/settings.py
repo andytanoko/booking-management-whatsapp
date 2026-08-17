@@ -3,9 +3,11 @@ from datetime import datetime
 from flask import Blueprint, current_app, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
-from app.models import AuditLog, Booking, MaintenanceReminder, ServiceType, db
-from app.services.booking_engine import compute_booking_end
+from app.models import Booking, MaintenanceReminder, ServiceType, db
+from app.services.audit_service import AuditService
+from app.services.maintenance_service import MaintenanceService
 from app.services.reminders import DEFAULT_APPOINTMENT_REMINDER_TEMPLATE
+from app.services.service_type_service import ServiceTypeService
 from app.services.settings_store import get_many, get_setting, set_setting
 from app.services.whatsapp import (
     create_wa_instance,
@@ -18,8 +20,6 @@ from app.services.whatsapp import (
 
 settings_bp = Blueprint('settings', __name__)
 
-MAINTENANCE_SERVICE_NAME = 'Maintenance'
-VALID_AFTER_SERVICE_VALUES = {'', 'Maintenance'}
 DEFAULT_BOOKING_DONE_TEMPLATE = (
     'Halo {nama}, kabar baik! Kendaraan Anda untuk layanan *{layanan}* '
     'sudah *selesai* dikerjakan dan siap diambil. Nomor polisi: *{nomor_polisi}*. Terima kasih 🙏'
@@ -91,77 +91,32 @@ def manage_settings():
         if request.method == 'POST':
             action = request.form.get('action', 'save')
             if action == 'service_create':
-                name = request.form.get('service_name', '').strip()
-                duration_value = request.form.get('service_duration', '').strip()
-                duration_unit = request.form.get('service_unit', 'menit').strip()
-                after_service = request.form.get('service_after_service', '').strip()
-                try:
-                    duration_num = float(duration_value)
-                    duration_minutes = duration_num * {'menit': 1, 'jam': 60, 'hari': 1440}.get(duration_unit, 1)
-                    if not name or len(name) < 3:
-                        error = 'Nama layanan harus minimal 3 karakter'
-                    elif after_service not in VALID_AFTER_SERVICE_VALUES:
-                        error = 'After Service tidak valid'
-                    elif ServiceType.query.filter_by(name=name).first():
-                        error = 'Layanan dengan nama ini sudah ada'
-                    else:
-                        db.session.add(ServiceType(name=name, duration_minutes=duration_minutes, active=True, after_service=after_service or None))
-                        db.session.add(AuditLog(actor_user_id=current_user.id, action='service.create', details=f'name={name} duration={duration_num}{duration_unit} after_service={after_service or "-"}'))
-                        db.session.commit()
-                        message = f"Layanan '{name}' berhasil ditambahkan"
-                except (ValueError, TypeError):
-                    error = 'Durasi harus berupa angka'
+                message, error = ServiceTypeService.create(
+                    request.form.get('service_name', ''),
+                    request.form.get('service_duration', ''),
+                    request.form.get('service_unit', 'menit'),
+                    request.form.get('service_after_service', ''),
+                    actor_id=current_user.id,
+                )
             elif action == 'service_update':
-                service_id = int(request.form.get('service_id', '0') or 0)
-                name = request.form.get('service_name', '').strip()
-                duration_value = request.form.get('service_duration', '').strip()
-                duration_unit = request.form.get('service_unit', 'menit').strip()
-                after_service = request.form.get('service_after_service', '').strip()
-                service = ServiceType.query.get(service_id)
-                if not service:
-                    error = 'Layanan tidak ditemukan'
-                else:
-                    try:
-                        duration_num = float(duration_value)
-                        duration_minutes = duration_num * {'menit': 1, 'jam': 60, 'hari': 1440}.get(duration_unit, 1)
-                        if not name or len(name) < 3:
-                            error = 'Nama layanan harus minimal 3 karakter'
-                        elif after_service not in VALID_AFTER_SERVICE_VALUES:
-                            error = 'After Service tidak valid'
-                        elif ServiceType.query.filter(ServiceType.name == name, ServiceType.id != service_id).first():
-                            error = 'Layanan dengan nama ini sudah ada'
-                        else:
-                            service.name = name
-                            service.duration_minutes = duration_minutes
-                            service.after_service = after_service or None
-                            db.session.add(AuditLog(actor_user_id=current_user.id, action='service.update', details=f'service_id={service_id} name={name} duration={duration_num}{duration_unit} after_service={after_service or "-"}'))
-                            db.session.commit()
-                            message = f"Layanan '{name}' berhasil diperbarui"
-                    except (ValueError, TypeError):
-                        error = 'Durasi harus berupa angka'
+                message, error = ServiceTypeService.update(
+                    int(request.form.get('service_id', '0') or 0),
+                    request.form.get('service_name', ''),
+                    request.form.get('service_duration', ''),
+                    request.form.get('service_unit', 'menit'),
+                    request.form.get('service_after_service', ''),
+                    actor_id=current_user.id,
+                )
             elif action == 'service_delete':
-                service_id = int(request.form.get('service_id', '0') or 0)
-                service = ServiceType.query.get(service_id)
-                if not service:
-                    error = 'Layanan tidak ditemukan'
-                elif Booking.query.filter_by(service_type_id=service_id).count() > 0:
-                    error = 'Layanan tidak bisa dihapus karena masih digunakan di booking'
-                else:
-                    service_name = service.name
-                    db.session.delete(service)
-                    db.session.add(AuditLog(actor_user_id=current_user.id, action='service.delete', details=f'service_id={service_id} name={service_name}'))
-                    db.session.commit()
-                    message = f"Layanan '{service_name}' berhasil dihapus"
+                message, error = ServiceTypeService.delete(
+                    int(request.form.get('service_id', '0') or 0),
+                    actor_id=current_user.id,
+                )
             elif action == 'service_toggle':
-                service_id = int(request.form.get('service_id', '0') or 0)
-                service = ServiceType.query.get(service_id)
-                if not service:
-                    error = 'Layanan tidak ditemukan'
-                else:
-                    service.active = not service.active
-                    db.session.add(AuditLog(actor_user_id=current_user.id, action='service.toggle', details=f'service_id={service_id} active={service.active}'))
-                    db.session.commit()
-                    message = f"Layanan '{service.name}' berhasil {'diaktifkan' if service.active else 'dinonaktifkan'}"
+                message, error = ServiceTypeService.toggle(
+                    int(request.form.get('service_id', '0') or 0),
+                    actor_id=current_user.id,
+                )
             elif action == 'save':
                 set_setting('public_base_url', request.url_root.strip().rstrip('/'))
                 for key in setting_keys:
@@ -175,7 +130,7 @@ def manage_settings():
                                 break
                         set_setting(key, value)
                 if not error:
-                    db.session.add(AuditLog(actor_user_id=current_user.id, action='settings.whatsapp.update', details='bridge-only'))
+                    AuditService.log('settings.whatsapp.update', actor_id=current_user.id, details='bridge-only')
                     db.session.commit()
                     message = 'Settings berhasil disimpan'
             elif action == 'test_send':
@@ -188,7 +143,28 @@ def manage_settings():
 
                     sent = app_module.send_and_log_message(phone, text)
                     if sent.status == 'failed':
-                        error = 'Gagal kirim. Pastikan bridge QR aktif, API key benar, dan session QR sudah tersambung'
+                        # Report the reason the gateway actually gave, and match
+                        # the advice to it. A generic "check the API key" hint is
+                        # actively misleading when the session simply isn't linked.
+                        reason = str(getattr(sent, 'send_error', '') or '').strip()
+                        if 'wa_not_connected' in reason or 'not connected' in reason:
+                            error = (
+                                'Gagal kirim: nomor WhatsApp belum tersambung. Jalankan sesi lalu '
+                                'scan QR di tabel "Nomor WhatsApp Terdaftar" sampai statusnya "Terhubung".'
+                            )
+                        elif 'bridge-not-found' in reason or 'unreachable' in reason or 'not-configured' in reason:
+                            error = (
+                                'Gagal kirim: gateway WhatsApp tidak bisa dihubungi. Periksa container '
+                                f'`openwa` (docker compose ps). Detail: {reason}'
+                            )
+                        elif 'number_not_on_whatsapp' in reason or 'not_on_whatsapp' in reason:
+                            error = f'Gagal kirim: nomor {phone} tidak terdaftar di WhatsApp.'
+                        elif 'invalid-phone' in reason:
+                            error = f'Gagal kirim: format nomor {phone} tidak valid (gunakan 62...).'
+                        elif reason:
+                            error = f'Gagal kirim: {reason}'
+                        else:
+                            error = 'Gagal kirim (tidak ada detail dari gateway).'
                     else:
                         message = f'Pesan test terkirim dengan status: {sent.status}'
             elif action == 'wa_number_add':
@@ -200,7 +176,7 @@ def manage_settings():
 
                     ok, status, instance = app_module.create_wa_instance(label)
                     if ok and instance:
-                        db.session.add(AuditLog(actor_user_id=current_user.id, action='whatsapp.instance.create', details=f"instance_id={instance.get('id')} label={label}"))
+                        AuditService.log('whatsapp.instance.create', actor_id=current_user.id, details=f"instance_id={instance.get('id')} label={label}")
                         db.session.commit()
                         message = f"Nomor WhatsApp '{label}' berhasil didaftarkan. Scan QR di bawah untuk menghubungkan."
                     else:
@@ -214,11 +190,35 @@ def manage_settings():
 
                     ok, status = app_module.delete_wa_instance(instance_id)
                     if ok:
-                        db.session.add(AuditLog(actor_user_id=current_user.id, action='whatsapp.instance.delete', details=f'instance_id={instance_id}'))
+                        AuditService.log('whatsapp.instance.delete', actor_id=current_user.id, details=f'instance_id={instance_id}')
                         db.session.commit()
                         message = 'Nomor WhatsApp berhasil dihapus'
                     else:
                         error = f'Gagal menghapus nomor WhatsApp: {status}'
+            elif action == 'wa_number_start':
+                # Creating a session does not connect it. Starting is what boots
+                # the engine and produces a QR - and it is also a linking
+                # handshake with WhatsApp, which is why it is an explicit action
+                # rather than something that happens on its own.
+                instance_id = request.form.get('instance_id', '').strip() or 'default'
+                from app import app as app_module
+
+                ok, status = app_module.start_wa_instance(instance_id)
+                if ok:
+                    AuditService.log('whatsapp.instance.start', actor_id=current_user.id, details=f'instance_id={instance_id}')
+                    db.session.commit()
+                    message = (
+                        'Sesi WhatsApp sedang dijalankan. Tunggu beberapa saat, '
+                        'lalu QR akan muncul di tabel di bawah (halaman menyegarkan sendiri).'
+                    )
+                elif 'rate' in status.lower() or '429' in status:
+                    error = (
+                        'WhatsApp menolak permintaan tautan karena terlalu banyak percobaan '
+                        f'(rate-overlimit / 429): {status}. Tunggu 48-72 jam tanpa mencoba lagi, '
+                        'lalu coba sekali saja.'
+                    )
+                else:
+                    error = f'Gagal menjalankan sesi WhatsApp: {status}'
             elif action == 'wa_number_pair':
                 instance_id = request.form.get('instance_id', '').strip() or 'default'
                 phone = request.form.get('pair_phone', '').strip()
@@ -229,9 +229,15 @@ def manage_settings():
 
                     ok, status, pairing_code = app_module.request_wa_pairing_code(phone, instance_id)
                     if ok and pairing_code:
-                        db.session.add(AuditLog(actor_user_id=current_user.id, action='whatsapp.instance.pair', details=f'instance_id={instance_id} phone={phone}'))
+                        AuditService.log('whatsapp.instance.pair', actor_id=current_user.id, details=f'instance_id={instance_id} phone={phone}')
                         db.session.commit()
                         message = f"Kode pairing untuk {phone}: {pairing_code}. Buka WhatsApp > Perangkat tertaut > Tautkan dengan nomor telepon, lalu masukkan kode ini."
+                    elif 'rate_limited' in status or 'rate-overlimit' in status:
+                        error = (
+                            'WhatsApp menolak permintaan tautan karena terlalu banyak percobaan '
+                            f'untuk nomor {phone} (rate-overlimit / 429). Tunggu beberapa jam '
+                            'sebelum mencoba lagi, lalu coba sekali saja.'
+                        )
                     else:
                         error = f'Gagal membuat kode pairing: {status}'
 
@@ -244,8 +250,14 @@ def manage_settings():
         profile = app_module.discover_bridge_profile([f"http://{request.host.split(':')[0]}:3000"])
         bridge_base = profile.base_url if profile else ''
         bridge_detected = bool(bridge_base)
-        qr_url = f"{request.host_url.rstrip('/')}/wa-bridge{profile.qr_path}" if (profile and bridge_base and profile.has_qr) else ''
-        qr_embed_url = f"/wa-bridge{profile.qr_path}?t={int(datetime.utcnow().timestamp())}" if (profile and qr_url) else ''
+        # The QR is served by this app's own authenticated route now, not proxied
+        # straight through to the gateway, so there is no /wa-bridge prefix.
+        if profile and bridge_base and profile.has_qr:
+            qr_embed_url = app_module.wa_instance_qr_embed_url(profile.instance_id)
+            qr_url = f"{request.host_url.rstrip('/')}{qr_embed_url}"
+        else:
+            qr_url = ''
+            qr_embed_url = ''
         wa_instances = []
         if bridge_detected:
             ok_instances, _, raw_instances = app_module.list_wa_instances()
@@ -309,7 +321,7 @@ def manage_templates():
                 set_setting('google_maps_business_url', review_url)
                 has_change = True
             if has_change:
-                db.session.add(AuditLog(actor_user_id=current_user.id, action='settings.templates.update', details='templates'))
+                AuditService.log('settings.templates.update', actor_id=current_user.id, details='templates')
                 db.session.commit()
                 message = 'Template berhasil disimpan'
             else:
@@ -344,78 +356,19 @@ def maintenance():
         action = request.form.get('action', '').strip()
         if action == 'send_reminder':
             reminder_id = int(request.form.get('reminder_id', '0') or 0)
-            reminder = MaintenanceReminder.query.get(reminder_id)
-            if not reminder:
-                error = 'Maintenance reminder tidak ditemukan'
-            else:
-                message_text = request.form.get('message', '').strip()
-                if not message_text:
-                    error = 'Pesan tidak boleh kosong'
-                else:
-                    from app import app as app_module
-
-                    sent = app_module.send_and_log_message(reminder.customer.phone, message_text)
-                    if sent.status == 'failed':
-                        error = f'Gagal kirim reminder: {sent.status}'
-                    else:
-                        reminder.reminder_sent_at = datetime.utcnow()
-                        db.session.add(AuditLog(actor_user_id=current_user.id, action='maintenance.reminder_sent', details=f'reminder_id={reminder_id} customer={reminder.customer.phone}'))
-                        db.session.commit()
-                        message = f'Maintenance reminder terkirim ke {reminder.customer.name}'
+            message, error = MaintenanceService.send_reminder(
+                reminder_id, request.form.get('message', ''), actor_id=current_user.id,
+            )
         elif action == 'send_review':
             reminder_id = int(request.form.get('reminder_id', '0') or 0)
-            reminder = MaintenanceReminder.query.get(reminder_id)
-            if not reminder:
-                error = 'Maintenance reminder tidak ditemukan'
-            else:
-                message_text = request.form.get('message', '').strip()
-                if not message_text:
-                    error = 'Pesan tidak boleh kosong'
-                else:
-                    from app import app as app_module
-
-                    sent = app_module.send_and_log_message(reminder.customer.phone, message_text)
-                    if sent.status == 'failed':
-                        error = f'Gagal kirim review request: {sent.status}'
-                    else:
-                        reminder.review_requested_at = datetime.utcnow()
-                        db.session.add(AuditLog(actor_user_id=current_user.id, action='maintenance.review_requested', details=f'reminder_id={reminder_id} customer={reminder.customer.phone}'))
-                        db.session.commit()
-                        message = f'Review request terkirim ke {reminder.customer.name}'
+            message, error = MaintenanceService.send_review(
+                reminder_id, request.form.get('message', ''), actor_id=current_user.id,
+            )
         elif action == 'book_maintenance':
             reminder_id = int(request.form.get('reminder_id', '0') or 0)
-            reminder = MaintenanceReminder.query.get(reminder_id)
-            service = ServiceType.query.filter_by(name=MAINTENANCE_SERVICE_NAME).first()
-            if not reminder:
-                error = 'Maintenance reminder tidak ditemukan'
-            elif not service:
-                error = f"Layanan '{MAINTENANCE_SERVICE_NAME}' belum tersedia di Settings"
-            else:
-                schedule_raw = request.form.get('scheduled_start', '').strip()
-                try:
-                    start_time = datetime.strptime(schedule_raw, '%Y-%m-%d')
-                except ValueError:
-                    start_time = None
-                    error = 'Tanggal booking wajib diisi dengan format yang valid'
-                if not error and start_time is not None:
-                    original_booking = reminder.booking
-                    new_booking = Booking(
-                        customer_id=reminder.customer.id,
-                        service_type_id=service.id,
-                        scheduled_start=start_time,
-                        scheduled_end=compute_booking_end(service, start_time),
-                        status='dikonfirmasi',
-                        source='maintenance',
-                        notes=f'Booking maintenance dari reminder #{reminder.id}',
-                        vehicle_type=(original_booking.vehicle_type if original_booking else None) or reminder.customer.vehicle_info,
-                        license_plate=original_booking.license_plate if original_booking else None,
-                        created_by_user_id=current_user.id,
-                    )
-                    db.session.add(new_booking)
-                    db.session.add(AuditLog(actor_user_id=current_user.id, action='maintenance.booking_created', details=f'reminder_id={reminder.id} customer={reminder.customer.phone} service={service.name}'))
-                    db.session.delete(reminder)
-                    db.session.commit()
-                    message = f"Booking '{service.name}' berhasil dibuat untuk {reminder.customer.name}. Atur tanggal jadwalnya di halaman Bookings."
+            message, error = MaintenanceService.book_maintenance(
+                reminder_id, request.form.get('scheduled_start', ''), actor_id=current_user.id,
+            )
 
     reminders = MaintenanceReminder.query.join(Booking).order_by(MaintenanceReminder.maintenance_due_at.asc()).all()
     reminder_template = get_setting('maintenance_reminder_template', DEFAULT_MAINTENANCE_REMINDER_TEMPLATE)

@@ -338,13 +338,12 @@ class TestCustomerServiceGetOrCreateByPhone:
         with app.app_context():
             assert CustomerService.get_or_create_by_phone("abc") is None
 
-    def test_creates_new_customer(self, app):
-        """A new customer is created when none exists for the phone."""
+    def test_missing_customer_returns_none(self, app):
+        """No placeholder customer is created when none exists for the phone."""
         with app.app_context():
             result = CustomerService.get_or_create_by_phone("08123456789")
-            assert result is not None
-            assert result.phone == "628123456789"
-            assert result.id is not None
+            assert result is None
+            assert Customer.query.filter_by(phone="628123456789").first() is None
 
     def test_returns_existing_customer(self, app):
         """An existing customer is returned without creating a duplicate."""

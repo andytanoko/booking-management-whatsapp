@@ -8,7 +8,6 @@ from datetime import datetime
 from flask import Flask, Response, current_app, jsonify, redirect, render_template, request, session, url_for
 from flask_login import LoginManager, current_user, login_user as flask_login_user
 from flask_migrate import Migrate
-from sqlalchemy.exc import IntegrityError
 
 from app.blueprints.auth import auth_bp
 from app.blueprints.bookings import bookings_bp
@@ -17,6 +16,7 @@ from app.blueprints.whatsapp import whatsapp_bp
 from app.models import AuditLog, Booking, Customer, ServiceType, User, WhatsAppMessage, db
 from app.services.booking_engine import compute_booking_end, has_conflict
 from app.services.customer_service import CustomerService
+from app.services.user_service import UserService
 from app.services.message_service import MessageService
 from app.services.message_service import BOOKING_FORM_LABELS
 from app.services.reminders import run_due_reminders
@@ -31,6 +31,7 @@ from app.services.whatsapp import (
     normalize_whatsapp_number,
     request_wa_pairing_code as _request_wa_pairing_code,
     send_and_log_message as _send_and_log_message,
+    start_wa_instance as _start_wa_instance,
     wa_instance_qr_embed_url as _wa_instance_qr_embed_url,
 )
 from app.blueprints.whatsapp import (
@@ -282,6 +283,10 @@ def delete_wa_instance(instance_id: str):
 
 def request_wa_pairing_code(phone: str, instance_id: str = "default"):
     return _request_wa_pairing_code(phone, instance_id)
+
+
+def start_wa_instance(instance_id: str = "default"):
+    return _start_wa_instance(instance_id)
 
 
 def wa_instance_qr_embed_url(base_or_instance: str, maybe_instance_id: str | None = None) -> str:
@@ -542,42 +547,15 @@ def create_app():
         created = 0
         updated = 0
         for item in contacts:
-            number = str(item.get('number', '') or '').strip()
-            lid = str(item.get('lid', '') or '').strip()
-            name = str(item.get('name', '') or '').strip()
-            number_ok = number.isdigit() and 8 <= len(number) <= 15
-            lid_ok = lid.isdigit() and 8 <= len(lid) <= 20
-            if not number_ok and not lid_ok:
-                continue
-
-            customer = Customer.query.filter_by(lid=lid).first() if lid_ok else None
-            if customer is None and number_ok:
-                customer = Customer.query.filter_by(phone=number).first()
-
-            if customer is None:
-                phone_val = number if number_ok else lid
-                new_customer = Customer(name=name or f'WhatsApp {phone_val[-4:]}', phone=phone_val, lid=lid if lid_ok else None, notes='Sinkron dari WhatsApp')
-                db.session.add(new_customer)
-                try:
-                    db.session.flush()
-                    created += 1
-                except IntegrityError:
-                    db.session.rollback()
-            else:
-                changed = False
-                if number_ok and customer.phone != number:
-                    clash = Customer.query.filter(Customer.phone == number, Customer.id != customer.id).first()
-                    if clash is None:
-                        customer.phone = number
-                        changed = True
-                if lid_ok and not customer.lid:
-                    customer.lid = lid
-                    changed = True
-                if name and (not customer.name or customer.name.startswith('WhatsApp ') or customer.name.startswith('Pelanggan ')):
-                    customer.name = name
-                    changed = True
-                if changed:
-                    updated += 1
+            _, outcome = CustomerService.sync_from_whatsapp(
+                number=item.get('number'),
+                lid=item.get('lid'),
+                contact_name=item.get('name'),
+            )
+            if outcome == 'created':
+                created += 1
+            elif outcome == 'updated':
+                updated += 1
 
         db.session.add(AuditLog(actor_user_id=current_user.id, action='customer.sync_whatsapp', details=f'created={created} updated={updated} total={len(contacts)}'))
         db.session.commit()
@@ -596,63 +574,26 @@ def create_app():
             action = request.form.get('action', 'create').strip()
             if action == 'delete':
                 user_id = int(request.form.get('user_id', '0') or 0)
-                user = User.query.get(user_id)
-                if not user:
-                    error = 'User tidak ditemukan'
-                elif user.id == current_user.id:
-                    error = 'Tidak bisa menghapus akun sendiri'
-                else:
-                    db.session.add(AuditLog(actor_user_id=current_user.id, action='user.delete', details=f'username={user.username} role={user.role}'))
-                    db.session.delete(user)
-                    db.session.commit()
-                    message = f"User '{user.username}' berhasil dihapus"
+                message, error = UserService.delete(user_id, actor_id=current_user.id)
             elif action == 'toggle_active':
                 user_id = int(request.form.get('user_id', '0') or 0)
-                user = User.query.get(user_id)
-                if not user:
-                    error = 'User tidak ditemukan'
-                elif user.id == current_user.id:
-                    error = 'Tidak bisa menonaktifkan akun sendiri'
-                else:
-                    user.active = not user.active
-                    db.session.add(AuditLog(actor_user_id=current_user.id, action='user.toggle_active', details=f'username={user.username} active={user.active}'))
-                    db.session.commit()
-                    message = f"User '{user.username}' berhasil {'diaktifkan' if user.active else 'dinonaktifkan'}"
+                message, error = UserService.toggle_active(user_id, actor_id=current_user.id)
             elif action == 'update':
                 user_id = int(request.form.get('user_id', '0') or 0)
-                username = request.form.get('username', '').strip()
-                password = request.form.get('password', '').strip()
-                role = request.form.get('role', '').strip()
-                user = User.query.get(user_id)
-                if not user:
-                    error = 'User tidak ditemukan'
-                elif not username or role not in {'admin', 'cs', 'technician'}:
-                    error = 'Username dan role wajib diisi'
-                elif User.query.filter(User.username == username, User.id != user_id).first():
-                    error = 'Username sudah digunakan oleh user lain'
-                else:
-                    user.username = username
-                    user.role = role
-                    if password:
-                        user.set_password(password)
-                    db.session.add(AuditLog(actor_user_id=current_user.id, action='user.update', details=f'user_id={user_id} username={username} role={role}'))
-                    db.session.commit()
-                    message = f"User '{username}' berhasil diperbarui"
+                message, error = UserService.update(
+                    user_id,
+                    request.form.get('username', ''),
+                    request.form.get('password', ''),
+                    request.form.get('role', ''),
+                    actor_id=current_user.id,
+                )
             else:
-                username = request.form.get('username', '').strip()
-                password = request.form.get('password', '').strip()
-                role = request.form.get('role', '').strip()
-                if not username or not password or role not in {'admin', 'cs', 'technician'}:
-                    error = 'Username, password, dan role wajib diisi'
-                elif User.query.filter_by(username=username).first():
-                    error = 'Username sudah digunakan'
-                else:
-                    user = User(username=username, role=role, active=True)
-                    user.set_password(password)
-                    db.session.add(user)
-                    db.session.add(AuditLog(actor_user_id=current_user.id, action='user.create', details=f'username={username} role={role}'))
-                    db.session.commit()
-                    message = 'User berhasil ditambahkan'
+                message, error = UserService.create(
+                    request.form.get('username', ''),
+                    request.form.get('password', ''),
+                    request.form.get('role', ''),
+                    actor_id=current_user.id,
+                )
 
         all_users = User.query.order_by(User.created_at.desc()).all()
         return render_template('users.html', users=all_users, message=message, error=error, current_uid=current_user.id, partial=wants_partial())

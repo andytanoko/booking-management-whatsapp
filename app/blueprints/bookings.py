@@ -1,11 +1,13 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, current_app, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
-from app.models import AuditLog, Booking, Customer, MaintenanceReminder, ServiceType, db
+from app.models import Booking, Customer, ServiceType, db
+from app.services.audit_service import AuditService
 from app.services.booking_engine import compute_booking_end, has_conflict
+from app.services.booking_service import BookingService
 from app.services.customer_service import CustomerService
 from app.services.semantic_matcher import get_variant_info, match_package_to_service
 from app.services.settings_store import get_setting
@@ -138,30 +140,7 @@ def list_bookings():
         if action == 'update_status':
             booking_id = int(request.form.get('booking_id', '0') or 0)
             new_status = request.form.get('status', '').strip().lower()
-            booking = db.session.get(Booking, booking_id)
-            if not booking:
-                error = 'Booking tidak ditemukan'
-            elif new_status not in BOOKING_STATUSES:
-                error = 'Status tidak valid'
-            else:
-                old_status = booking.status
-                booking.status = new_status
-                db.session.add(AuditLog(actor_user_id=current_user.id, action='booking.status_change', details=f'booking_id={booking.id} {old_status}->{new_status}'))
-                db.session.commit()
-                message = f"Status booking #{booking.id} diperbarui menjadi '{BOOKING_STATUSES[new_status]}'"
-                if new_status == 'selesai' and booking.service_type.after_service:
-                    existing_reminder = MaintenanceReminder.query.filter_by(booking_id=booking.id).first()
-                    if not existing_reminder:
-                        reminder = MaintenanceReminder(
-                            booking_id=booking.id,
-                            customer_id=booking.customer_id,
-                            service_type=booking.service_type.name,
-                            completed_at=datetime.utcnow(),
-                            maintenance_due_at=datetime.utcnow() + timedelta(days=180),
-                        )
-                        db.session.add(reminder)
-                        db.session.commit()
-                        message += ' | Maintenance reminder dibuat (6 bulan).'
+            message, error = BookingService.update_status(booking_id, new_status, actor_id=current_user.id)
             return render_bookings(message, error)
 
         if action == 'notify_customer':
@@ -183,7 +162,7 @@ def list_bookings():
                     if sent.status == 'failed':
                         error = f'Gagal mengirim notifikasi: {sent.status}'
                     else:
-                        db.session.add(AuditLog(actor_user_id=current_user.id, action='booking.notify_customer', details=f"booking_id={booking.id} to={target.split('@', 1)[0]}"))
+                        AuditService.log('booking.notify_customer', actor_id=current_user.id, details=f"booking_id={booking.id} to={target.split('@', 1)[0]}")
                         db.session.commit()
                         message = f'Notifikasi terkirim ke {booking.customer.name}'
             return render_bookings(message, error)
@@ -191,30 +170,7 @@ def list_bookings():
         if action == 'request_reschedule':
             booking_id = int(request.form.get('booking_id', '0') or 0)
             new_date_raw = request.form.get('new_scheduled_start', '').strip()
-            booking = db.session.get(Booking, booking_id)
-            if not booking:
-                error = 'Booking tidak ditemukan'
-            elif booking.status == 'reschedule':
-                error = 'Booking sudah dalam status reschedule'
-            else:
-                requested_date = None
-                if new_date_raw:
-                    try:
-                        try:
-                            new_date = datetime.strptime(new_date_raw, '%Y-%m-%dT%H:%M')
-                        except ValueError:
-                            new_date = datetime.strptime(new_date_raw, '%Y-%m-%d')
-                        requested_date = new_date.strftime('%d-%m-%Y')
-                    except ValueError:
-                        error = 'Format tanggal tidak valid'
-                if not error:
-                    booking.status = 'reschedule'
-                    if requested_date:
-                        note_prefix = f'[Permintaan reschedule: {requested_date}]'
-                        booking.notes = f'{note_prefix}\n{booking.notes}' if booking.notes else note_prefix
-                    db.session.add(AuditLog(actor_user_id=current_user.id, action='booking.request_reschedule', details=f"booking_id={booking.id} requested_date={requested_date or 'none'}"))
-                    db.session.commit()
-                    message = f'Permintaan reschedule untuk booking #{booking.id} berhasil dikirim'
+            message, error = BookingService.request_reschedule(booking_id, new_date_raw, actor_id=current_user.id)
             return render_bookings(message, error)
 
         customer_name = request.form.get('customer_name', '').strip()
@@ -287,28 +243,20 @@ def list_bookings():
                         error = wa_error
 
                 if not error:
-                    if not customer:
-                        customer = Customer(name=customer_name, phone=phone, vehicle_info=vehicle_type or None)
-                        db.session.add(customer)
-                        db.session.flush()
-
-                    booking = Booking(
-                        customer_id=customer.id,
-                        service_type_id=service.id,
-                        scheduled_start=start_time,
-                        scheduled_end=end_time,
-                        status='dikonfirmasi',
-                        source='manual',
-                        notes=notes,
-                        other_info=package_name,
+                    booking = BookingService.create_manual(
+                        customer=customer,
+                        customer_name=customer_name,
+                        phone=phone,
                         vehicle_type=vehicle_type,
+                        service=service,
+                        start_time=start_time,
+                        end_time=end_time,
+                        notes=notes,
+                        package_name=package_name,
                         license_plate=license_plate,
                         price_amount=price_amount,
-                        created_by_user_id=current_user.id,
+                        actor_id=current_user.id,
                     )
-                    db.session.add(booking)
-                    db.session.add(AuditLog(actor_user_id=current_user.id, action='booking.create', details=f'booking_id=pending customer={customer.phone} service={service.name}'))
-                    db.session.commit()
                     message = 'Booking berhasil dibuat'
 
     return render_bookings(message, error)
@@ -404,19 +352,21 @@ def edit_booking(booking_id: int):
                                     error = _validate_active_whatsapp_number(phone)
 
                         if not error:
-                            target_customer.name = customer_name
-                            target_customer.phone = phone
-                            target_customer.vehicle_info = vehicle_type or None
-                            booking.service_type_id = service.id
-                            booking.scheduled_start = start_time
-                            booking.scheduled_end = end_time
-                            booking.notes = notes
-                            booking.other_info = package_name
-                            booking.vehicle_type = vehicle_type
-                            booking.license_plate = license_plate
-                            booking.price_amount = price_amount
-                            db.session.add(AuditLog(actor_user_id=current_user.id, action='booking.edit', details=f'booking_id={booking.id} customer={target_customer.phone} service={service.name}'))
-                            db.session.commit()
+                            BookingService.apply_edit(
+                                booking,
+                                target_customer,
+                                customer_name=customer_name,
+                                phone=phone,
+                                vehicle_type=vehicle_type,
+                                service=service,
+                                start_time=start_time,
+                                end_time=end_time,
+                                notes=notes,
+                                package_name=package_name,
+                                license_plate=license_plate,
+                                price_amount=price_amount,
+                                actor_id=current_user.id,
+                            )
                             message = 'Booking berhasil diperbarui'
                             return redirect(url_for('bookings.list_bookings'))
 
